@@ -1,13 +1,31 @@
+import 'katex/dist/katex.min.css';
+import './styles/tokens.css';
+import './styles/base.css';
+import './styles/layout.css';
+import './styles/thread.css';
+import './styles/composer.css';
+import './styles/markdown.css';
+import './styles/dialog.css';
+import './styles/settings.css';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { APP_NAME } from '../../shared/defaults';
+import { boot, handlePopState, startListPolling } from './actions';
+import { App } from './App';
+import { startStreamSync } from './streams';
+import { startTheme } from './theme';
 
-function App() {
-  return <h1>{APP_NAME}</h1>;
-}
+startTheme();
+startStreamSync();
+startListPolling();
+window.addEventListener('popstate', handlePopState);
 
-createRoot(document.getElementById('root')!).render(
+const rootElement = document.getElementById('root');
+if (!rootElement) throw new Error('The page is missing its #root element.');
+
+createRoot(rootElement).render(
   <StrictMode>
     <App />
   </StrictMode>,
 );
+
+void boot();
