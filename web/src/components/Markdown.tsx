@@ -50,6 +50,8 @@ function TableWrap({ node: _node, ...rest }: ComponentPropsWithoutRef<'table'> &
 }
 
 function Link({ node: _node, href, children, ...rest }: ComponentPropsWithoutRef<'a'> & { node?: unknown }) {
+  // The URL transform empties unsafe targets (javascript: and the like); show those as text.
+  if (!href) return <span className="md-unsafe-link">{children}</span>;
   return (
     <a {...rest} href={href} target="_blank" rel="noopener noreferrer">
       {children}

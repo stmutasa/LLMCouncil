@@ -41,22 +41,20 @@ export function Thread({ threadKey, conversation, pendingMessage, children }: Th
       <FollowContext.Provider value={following}>
         <div className="thread-scroll" ref={scrollRef}>
           <div className="thread" ref={contentRef}>
-        {children}
-        {conversation && (
-          <h2 className="visually-hidden">Conversation: {conversation.title}</h2>
-        )}
-        {turns.map((turn, i) => (
-          <Fragment key={turn.id}>
-            <UserMessage text={turn.userMessage} members={turn.members} />
-            <AssistantTurn
-              turn={turn}
-              conversationId={conversation!.id}
-              isLast={i === turns.length - 1}
-              streamState={streams[turn.id] ?? null}
-            />
-          </Fragment>
-        ))}
-        {pendingMessage !== null && <UserMessage text={pendingMessage} members={settingsMembers ?? []} pending />}
+            {children}
+            {conversation && <h2 className="visually-hidden">Conversation: {conversation.title}</h2>}
+            {turns.map((turn, i) => (
+              <Fragment key={turn.id}>
+                <UserMessage text={turn.userMessage} members={turn.members} />
+                <AssistantTurn
+                  turn={turn}
+                  conversationId={conversation?.id ?? threadKey}
+                  isLast={i === turns.length - 1}
+                  streamState={streams[turn.id] ?? null}
+                />
+              </Fragment>
+            ))}
+            {pendingMessage !== null && <UserMessage text={pendingMessage} members={settingsMembers ?? []} pending />}
           </div>
         </div>
       </FollowContext.Provider>

@@ -22,6 +22,10 @@ interface Entry {
   ended: boolean;
   attempt: number;
   retryTimer: number | null;
+  /** When the last event (or successful probe) was seen, for the silence watchdog. */
+  lastSeen: number;
+  watchdog: number | null;
+  probing: boolean;
 }
 
 const entries = new Map<string, Entry>();
@@ -93,11 +97,13 @@ function connect(entry: Entry): void {
   source.onopen = () => {
     if (entries.get(entry.turnId) !== entry) return;
     entry.attempt = 0;
+    entry.lastSeen = Date.now();
     setStreamState(entry.turnId, 'live');
   };
 
   source.onmessage = (message: MessageEvent<string>) => {
     if (entries.get(entry.turnId) !== entry) return;
+    entry.lastSeen = Date.now();
     const event = parseRunEvent(message.data);
     if (!event) return;
     if (event.type === 'turn.end') {
@@ -140,6 +146,7 @@ async function retry(entry: Entry): Promise<void> {
     const conversation = await api.conversation(entry.conversationId);
     if (entries.get(entry.turnId) !== entry) return;
     const turn = conversation.turns.find((t) => t.id === entry.turnId);
+    entry.lastSeen = Date.now();
     if (!turn || turn.status !== 'running') {
       // Fresh data shows the turn finished; the store subscription closes this entry.
       replaceOpenConversation(conversation);
@@ -157,10 +164,64 @@ async function retry(entry: Entry): Promise<void> {
   }
 }
 
+const SILENCE_MS = 20_000;
+
+/**
+ * A connection can go quiet without ever reporting an error: a proxy (such as the dev server's)
+ * may keep the browser side open after the server behind it has gone away, and a long model
+ * call can legitimately send nothing for a while. After a stretch of silence, ask the server
+ * directly: unreachable means reconnect with backoff, a finished turn means show the stored
+ * result, and a turn still running gets a fresh connection, whose snapshot repairs anything
+ * a stale connection missed.
+ */
+async function probe(entry: Entry): Promise<void> {
+  if (entry.probing || entry.ended || entry.source === null) return;
+  entry.probing = true;
+  try {
+    const conversation = await api.conversation(entry.conversationId);
+    if (entries.get(entry.turnId) !== entry || entry.ended) return;
+    entry.lastSeen = Date.now();
+    const turn = conversation.turns.find((t) => t.id === entry.turnId);
+    if (!turn || turn.status !== 'running') {
+      entry.source?.close();
+      entry.source = null;
+      replaceOpenConversation(conversation);
+      void refreshConversations();
+      return;
+    }
+    entry.source?.close();
+    connect(entry);
+  } catch (err) {
+    if (entries.get(entry.turnId) !== entry || entry.ended) return;
+    entry.source?.close();
+    entry.source = null;
+    if (err instanceof ApiError && err.status === 404) {
+      markOpenConversationMissing(entry.conversationId);
+      return;
+    }
+    scheduleRetry(entry);
+  } finally {
+    entry.probing = false;
+  }
+}
+
 function open(conversationId: string, turnId: string): void {
-  const entry: Entry = { conversationId, turnId, source: null, ended: false, attempt: 0, retryTimer: null };
+  const entry: Entry = {
+    conversationId,
+    turnId,
+    source: null,
+    ended: false,
+    attempt: 0,
+    retryTimer: null,
+    lastSeen: Date.now(),
+    watchdog: null,
+    probing: false,
+  };
   entries.set(turnId, entry);
   connect(entry);
+  entry.watchdog = window.setInterval(() => {
+    if (Date.now() - entry.lastSeen > SILENCE_MS) void probe(entry);
+  }, 5000);
 }
 
 function close(turnId: string): void {
@@ -169,6 +230,7 @@ function close(turnId: string): void {
   entries.delete(turnId);
   entry.source?.close();
   if (entry.retryTimer !== null) window.clearTimeout(entry.retryTimer);
+  if (entry.watchdog !== null) window.clearInterval(entry.watchdog);
   setStreamState(turnId, null);
 }
 

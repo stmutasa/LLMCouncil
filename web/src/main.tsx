@@ -11,6 +11,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { boot, handlePopState, startListPolling } from './actions';
 import { App } from './App';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { startStreamSync } from './streams';
 import { startTheme } from './theme';
 
@@ -24,7 +25,9 @@ if (!rootElement) throw new Error('The page is missing its #root element.');
 
 createRoot(rootElement).render(
   <StrictMode>
-    <App />
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   </StrictMode>,
 );
 

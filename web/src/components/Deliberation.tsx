@@ -385,17 +385,20 @@ function ExtractedRanking({ response, round, members }: { response: MemberRespon
     <div className="ranking-row">
       <span className="ranking-label">Extracted ranking</span>
       <ol className="ranking-list">
-        {response.ranking.map((label) => {
+        {response.ranking.map((label, i) => {
           const memberId = round.labels[label];
           const m = memberId ? lookup(members, memberId) : null;
           return (
             <li key={label}>
+              <span className="ranking-num">{i + 1}.</span>
               {m ? (
                 <>
-                  <MemberDot color={m.color} /> {m.name} <span className="muted">(Response {label})</span>
+                  <MemberDot color={m.color} />
+                  <span>{m.name}</span>
+                  <span className="muted">(Response {label})</span>
                 </>
               ) : (
-                `Response ${label}`
+                <span>Response {label}</span>
               )}
             </li>
           );

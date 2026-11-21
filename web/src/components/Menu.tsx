@@ -92,12 +92,22 @@ export function Menu({
   }, [placement]);
 
   useLayoutEffect(() => {
-    if (!open) return;
-    place();
+    if (open) place();
+  }, [open, place]);
+
+  // Focus moves into the menu once it is positioned (a hidden element cannot take focus).
+  const focusedOnOpen = useRef(false);
+  useLayoutEffect(() => {
+    if (!open) {
+      focusedOnOpen.current = false;
+      return;
+    }
+    if (!position || focusedOnOpen.current) return;
+    focusedOnOpen.current = true;
     const items = menuItems(menuRef.current);
     const checked = items.find((el) => el.getAttribute('aria-checked') === 'true');
     (checked ?? items[0])?.focus();
-  }, [open, place]);
+  }, [open, position]);
 
   useEffect(() => {
     if (!open) return;
@@ -228,6 +238,7 @@ interface MenuItemProps {
 
 export function MenuItem({ onSelect, children, checked, description, icon, danger, restoreFocus = true }: MenuItemProps) {
   const ctx = useContext(MenuContext);
+  const id = useId();
   const radio = checked !== undefined;
   const select = () => {
     ctx?.close(restoreFocus);
@@ -237,6 +248,8 @@ export function MenuItem({ onSelect, children, checked, description, icon, dange
     <div
       role={radio ? 'menuitemradio' : 'menuitem'}
       aria-checked={radio ? checked : undefined}
+      aria-labelledby={`${id}-label`}
+      aria-describedby={description ? `${id}-desc` : undefined}
       tabIndex={-1}
       className={`menu-item${danger ? ' danger' : ''}`}
       onClick={select}
@@ -249,8 +262,14 @@ export function MenuItem({ onSelect, children, checked, description, icon, dange
     >
       {icon && <span className="menu-item-icon">{icon}</span>}
       <span className="menu-item-body">
-        <span className="menu-item-label">{children}</span>
-        {description && <span className="menu-item-description">{description}</span>}
+        <span className="menu-item-label" id={`${id}-label`}>
+          {children}
+        </span>
+        {description && (
+          <span className="menu-item-description" id={`${id}-desc`}>
+            {description}
+          </span>
+        )}
       </span>
       {radio && <span className="menu-item-check">{checked && <Check size={16} aria-hidden="true" />}</span>}
     </div>

@@ -97,7 +97,7 @@ function MainView() {
       return (
         <>
           <Thread threadKey="" conversation={null} pendingMessage={pendingSend.message} />
-          <Composer convKey="" runningTurn={null} ready />
+          <Composer convKey="" runningTurn={null} ready autoFocus />
         </>
       );
     }

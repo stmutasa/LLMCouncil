@@ -78,6 +78,7 @@
 }
 
 .sidebar-list {
+  position: relative;
   flex: 1;
   min-height: 0;
   overflow-y: auto;
@@ -424,4 +425,16 @@
   height: 1px;
   margin: var(--space-1) var(--space-2);
   background: var(--border);
+}
+
+@media (max-width: 767.98px) {
+  .topbar {
+    padding: 0 var(--space-2);
+  }
+  .council-summary {
+    padding: 0 var(--space-2);
+  }
+  .council-summary-text {
+    display: none;
+  }
 }

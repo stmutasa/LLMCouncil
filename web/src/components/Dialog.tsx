@@ -1,25 +1,29 @@
-import { useEffect, useId, useLayoutEffect, useRef, useSyncExternalStore, type ReactNode } from 'react';
+import { useId, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 
 /**
  * Modal stack. Only the topmost dialog handles Escape and keeps focus; everything beneath it
- * (the app and lower dialogs) is made inert, so focus and pointer input cannot reach it.
+ * (the app and lower dialogs) is made inert, so focus and pointer input cannot reach it. Inert
+ * is applied synchronously, so focus can move into (or back to) a dialog in the same tick.
  */
-let stack: string[] = [];
-const listeners = new Set<() => void>();
+interface StackEntry {
+  id: string;
+  backdrop: HTMLElement;
+}
 
-function emit() {
+let stack: StackEntry[] = [];
+
+function applyInert() {
   const root = document.getElementById('root');
   if (root) root.inert = stack.length > 0;
-  for (const l of listeners) l();
+  stack.forEach((entry, i) => {
+    entry.backdrop.inert = i !== stack.length - 1;
+  });
 }
 
-function subscribe(listener: () => void) {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
+function isTopmost(id: string): boolean {
+  return stack[stack.length - 1]?.id === id;
 }
-
-const getStack = () => stack;
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -44,48 +48,40 @@ interface DialogProps {
 /** Mount to open, unmount to close. Focus returns to whatever was focused before it opened. */
 export function Dialog({ onRequestClose, labelledBy, describedBy, className, role = 'dialog', children }: DialogProps) {
   const id = useId();
+  const backdropRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onRequestClose);
   closeRef.current = onRequestClose;
-  const currentStack = useSyncExternalStore(subscribe, getStack);
-  const isTop = currentStack[currentStack.length - 1] === id;
 
   useLayoutEffect(() => {
-    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    stack = [...stack, id];
-    emit();
+    const backdrop = backdropRef.current;
     const panel = panelRef.current;
-    if (panel) {
-      const preferred = panel.querySelector<HTMLElement>('[data-autofocus]');
-      (preferred ?? panel).focus();
-    }
-    return () => {
-      stack = stack.filter((s) => s !== id);
-      emit();
-      if (previous && previous.isConnected) previous.focus();
-    };
-  }, [id]);
+    if (!backdrop || !panel) return;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    stack = [...stack, { id, backdrop }];
+    applyInert();
+    const preferred = panel.querySelector<HTMLElement>('[data-autofocus]');
+    (preferred ?? panel).focus();
 
-  useEffect(() => {
-    if (!isTop) return;
     const onKeyDown = (e: KeyboardEvent) => {
+      if (!isTopmost(id)) return;
       if (e.key === 'Escape' && !e.defaultPrevented) {
         e.preventDefault();
         closeRef.current();
         return;
       }
-      if (e.key !== 'Tab' || !panelRef.current) return;
-      const items = focusables(panelRef.current);
+      if (e.key !== 'Tab') return;
+      const items = focusables(panel);
       if (items.length === 0) {
         e.preventDefault();
-        panelRef.current.focus();
+        panel.focus();
         return;
       }
       const first = items[0]!;
       const last = items[items.length - 1]!;
       const active = document.activeElement;
-      const inside = active instanceof Node && panelRef.current.contains(active);
-      if (e.shiftKey && (active === first || !inside || active === panelRef.current)) {
+      const inside = active instanceof Node && panel.contains(active);
+      if (e.shiftKey && (active === first || !inside || active === panel)) {
         e.preventDefault();
         last.focus();
       } else if (!e.shiftKey && (active === last || !inside)) {
@@ -94,15 +90,21 @@ export function Dialog({ onRequestClose, labelledBy, describedBy, className, rol
       }
     };
     document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [isTop]);
+
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      stack = stack.filter((entry) => entry.id !== id);
+      applyInert();
+      if (previous && previous.isConnected) previous.focus();
+    };
+  }, [id]);
 
   return createPortal(
     <div
+      ref={backdropRef}
       className="dialog-backdrop"
-      inert={!isTop}
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) closeRef.current();
+        if (e.target === e.currentTarget && isTopmost(id)) closeRef.current();
       }}
     >
       <div

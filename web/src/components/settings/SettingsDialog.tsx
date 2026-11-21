@@ -116,6 +116,7 @@ export function SettingsDialog() {
               aria-selected={tab === t.id}
               aria-controls={panelId}
               tabIndex={tab === t.id ? 0 : -1}
+              data-autofocus={tab === t.id ? true : undefined}
               className={`settings-tab${tab === t.id ? ' selected' : ''}`}
               onClick={() => setTab(t.id)}
               onKeyDown={(e) => onTabKeyDown(e, i)}

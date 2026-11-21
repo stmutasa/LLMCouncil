@@ -152,14 +152,19 @@ function applyRoute(route: Route, initial: boolean): void {
   void loadConversation(route.id);
 }
 
+let loadSeq = 0;
+
 export async function loadConversation(id: string): Promise<void> {
+  // Only the latest request may fill the view (A → B → A must not show A's older response).
+  const seq = ++loadSeq;
+  const current = () => seq === loadSeq && getState().open?.id === id;
   setState({ open: { id, status: 'loading', conversation: null, error: null } });
   try {
     const conversation = await api.conversation(id);
-    if (getState().open?.id !== id) return;
+    if (!current()) return;
     setState({ open: { id, status: 'ready', conversation, error: null } });
   } catch (err) {
-    if (getState().open?.id !== id) return;
+    if (!current()) return;
     const notFound = err instanceof ApiError && (err.status === 404 || err.status === 400);
     setState({ open: { id, status: notFound ? 'notfound' : 'error', conversation: null, error: errorMessage(err) } });
   }
