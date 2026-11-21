@@ -124,6 +124,31 @@ function describeSpawnError(err: NodeJS.ErrnoException, o: ProcOptions): Provide
   }
 }
 
+/**
+ * On Windows, .cmd and .bat launchers run through cmd.exe, which stops reading its command line
+ * at the first line break: a prompt passed as an argument would silently lose everything after
+ * its first line. Native executables are unaffected.
+ */
+export function losesMultilineArgs(
+  command: string,
+  args: string[],
+  platform: NodeJS.Platform = process.platform,
+  parse: ((command: string, args: string[]) => { command: string }) | undefined = crossSpawnParse,
+): boolean {
+  if (platform !== 'win32' || !args.some((a) => /[\r\n]/.test(a))) return false;
+  if (/\.(?:cmd|bat)$/i.test(command)) return true;
+  if (/\.(?:exe|com)$/i.test(command) || !parse) return false;
+  try {
+    // cross-spawn swaps in the command interpreter exactly when the target needs it.
+    return /(?:^|[\\/])cmd(?:\.exe)?$/i.test(parse(command, [...args]).command);
+  } catch {
+    return false;
+  }
+}
+
+const crossSpawnParse = (spawn as unknown as { _parse?: (command: string, args: string[]) => { command: string } })
+  ._parse;
+
 function buildDiagnostics(stdout: string, stderr: string): string {
   const parts: string[] = [];
   const err = cleanCliText(stderr);
@@ -140,6 +165,11 @@ function buildDiagnostics(stdout: string, stderr: string): string {
  */
 export async function runProcess(o: ProcOptions): Promise<ProcResult> {
   if (o.signal?.aborted) throw abortError();
+  if (losesMultilineArgs(o.command, o.args)) {
+    throw new ProviderError(
+      `\`${o.command}\` is started through a Windows command script, which cannot receive a multi-line argument. Switch the provider's prompt delivery to stdin.`,
+    );
+  }
   const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-council-'));
   const removeCwd = () => {
     fs.rm(cwd, { recursive: true, force: true }).catch(() => undefined);
@@ -211,11 +241,15 @@ export async function runProcess(o: ProcOptions): Promise<ProcResult> {
 
     child.on('error', (err: NodeJS.ErrnoException) => {
       // Spawn failures arrive here; the process never ran, so there is nothing to kill.
-      if (child.pid === undefined) {
+      const neverRan = child.pid === undefined;
+      if (neverRan) {
         closed = true;
         cleanup();
       }
-      fail(child.pid === undefined ? describeSpawnError(err, o) : new ProviderError(`${o.cliName} failed: ${err.message}`));
+      // On Windows a missing command is reported after cmd.exe has run, so it has a pid; the
+      // error code, not the pid, says that the command could not be started.
+      const notStarted = neverRan || err.code === 'ENOENT' || err.code === 'EACCES' || err.code === 'E2BIG';
+      fail(notStarted ? describeSpawnError(err, o) : new ProviderError(`${o.cliName} failed: ${err.message}`));
     });
 
     const deliver = (line: string) => {

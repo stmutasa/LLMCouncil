@@ -54,6 +54,11 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => stop('SIGTERM'));
 }
 
+// A defect in one request must not take the whole server, and every running turn, down with it.
+process.on('unhandledRejection', (reason) => {
+  console.error('[server] Unhandled promise rejection:', reason);
+});
+
 void main().catch((err: unknown) => {
   console.error('The server failed to start:', err);
   killAll(true);

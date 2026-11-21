@@ -486,3 +486,20 @@ describe('orchestrator', () => {
     expect(turn.finalSource.kind).toBe('arbiter');
   });
 });
+
+describe('a turn that cannot be set up', () => {
+  it('ends with an error instead of rejecting or leaving the turn running', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    // An earlier turn without the fields the history builder reads.
+    const malformed = { id: 'old', status: 'complete', userMessage: 'hi' } as unknown as Turn;
+    const run = start({ history: [malformed] });
+    const turn = await run.end();
+    expect(turn.status).toBe('error');
+    expect(turn.error).toMatch(/Something went wrong while running this turn/);
+    expect(turn.finishedAt).not.toBeNull();
+    expect(turn.rounds.every((r) => r.status === 'skipped')).toBe(true);
+    expect(run.control.phase).toBe('finished');
+    expect(run.calls).toHaveLength(0);
+    error.mockRestore();
+  });
+});

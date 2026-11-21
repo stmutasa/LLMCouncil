@@ -20,11 +20,20 @@ export function hostnameOf(hostHeader: string): string | null {
   }
 }
 
-function originHostname(origin: string): string | null {
+/** "host:port" in the form a URL reports it (default ports omitted), or null if malformed. */
+function normalizedHost(scheme: 'http:' | 'https:', hostHeader: string): string | null {
+  if (!/^[A-Za-z0-9.\-:[\]]+$/.test(hostHeader)) return null;
+  try {
+    return new URL(`${scheme}//${hostHeader}`).host.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function parseOrigin(origin: string): URL | null {
   try {
     const url = new URL(origin);
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
-    return url.hostname.toLowerCase();
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url : null;
   } catch {
     return null;
   }
@@ -38,8 +47,9 @@ function hasBody(req: Request): boolean {
 
 /**
  * The server runs programs with the user's credentials, so the API only answers requests that
- * are addressed to this machine by name (defeating DNS rebinding), that do not come from another
- * site's pages, and whose bodies are JSON (which a cross-site form cannot send).
+ * are addressed to this machine by name (defeating DNS rebinding), that come from the app's own
+ * pages rather than another site or another local server, and whose bodies are JSON (which a
+ * cross-site form cannot send).
  */
 export function apiGuard(bindHost?: string) {
   const allowed = allowedHostnames(bindHost);
@@ -52,11 +62,24 @@ export function apiGuard(bindHost?: string) {
     }
     const origin = req.headers.origin;
     if (origin !== undefined) {
-      const originHost = originHostname(origin);
-      if (!originHost || !allowed.has(originHost)) {
+      // Same origin means the page was served from the very address the request is sent to.
+      // A page on another local port (some other program's web server) does not qualify.
+      const url = parseOrigin(origin);
+      const sameOrigin =
+        !!url &&
+        allowed.has(url.hostname.toLowerCase()) &&
+        url.host.toLowerCase() === normalizedHost(url.protocol as 'http:' | 'https:', host!);
+      if (!sameOrigin) {
         res.status(403).json({ error: `Cross-origin requests are not allowed (Origin: ${origin}).` });
         return;
       }
+    }
+    // Browsers label every request with where it came from. Requests without an Origin header
+    // (plain GETs from another site's page, such as an image tag) are caught here.
+    const site = req.headers['sec-fetch-site'];
+    if (site !== undefined && site !== 'same-origin' && site !== 'none') {
+      res.status(403).json({ error: 'Cross-site requests are not allowed.' });
+      return;
     }
     if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) && hasBody(req)) {
       const type = (req.headers['content-type'] ?? '').split(';')[0]!.trim().toLowerCase();

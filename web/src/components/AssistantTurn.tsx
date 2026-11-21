@@ -3,6 +3,7 @@ import { memo, useState } from 'react';
 import type { Turn } from '../../../shared/types';
 import { openSettings, regenerateTurn } from '../actions';
 import { useFollowing } from '../hooks/followContext';
+import { separateAnalysisEntries } from '../lib/analysis';
 import { answerPlaceholder, finalSourceLabel, isArbiterPhase, memberInfo } from '../lib/turn';
 import { useStore, type StreamState } from '../store';
 import { BillingBadge } from './BillingBadge';
@@ -72,7 +73,7 @@ export const AssistantTurn = memo(function AssistantTurn({ turn, conversationId,
           }
           className="analysis"
         >
-          <Markdown text={turn.analysisText} className="analysis-text" />
+          <Markdown text={separateAnalysisEntries(turn.analysisText)} className="analysis-text" />
         </Disclosure>
       )}
 

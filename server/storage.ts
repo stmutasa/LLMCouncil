@@ -1,7 +1,8 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
-import type { Conversation, ConversationSummary, Turn } from '../shared/types';
+import type { Conversation, ConversationSummary } from '../shared/types';
 import { parseMentions, type MentionTarget } from '../shared/mentions';
+import { parseConversation } from './conversationSchema';
 import { readFileIfExists, withFileLock, writeFileAtomic } from './util/fileQueue';
 
 export const CONVERSATION_ID_RE = /^[0-9a-f-]{36}$/;
@@ -36,17 +37,11 @@ export function summarize(conversation: Conversation, running: boolean): Convers
   };
 }
 
-function looksLikeConversation(value: unknown): value is Conversation {
-  if (!value || typeof value !== 'object') return false;
-  const c = value as Record<string, unknown>;
-  return (
-    typeof c.id === 'string' &&
-    typeof c.title === 'string' &&
-    typeof c.createdAt === 'string' &&
-    typeof c.updatedAt === 'string' &&
-    Array.isArray(c.turns) &&
-    c.turns.every((t: unknown) => !!t && typeof t === 'object' && typeof (t as Turn).id === 'string')
-  );
+/** What the conversation list needs from a file, without keeping its turns in memory. */
+export interface ListEntry {
+  summary: Omit<ConversationSummary, 'running'>;
+  /** A turn is stored as running; without a live run it has to be repaired. */
+  hasRunningTurn: boolean;
 }
 
 export class InvalidIdError extends Error {
@@ -59,6 +54,8 @@ export class InvalidIdError extends Error {
 export class Storage {
   readonly conversationsDir: string;
   private readonly reportedCorrupt = new Set<string>();
+  /** List entries by conversation id, valid while the file's size and modification time match. */
+  private readonly listCache = new Map<string, { mtimeMs: number; size: number; entry: ListEntry | null }>();
 
   constructor(readonly dataDir: string) {
     this.conversationsDir = path.join(dataDir, 'conversations');
@@ -76,8 +73,8 @@ export class Storage {
 
   private parse(file: string, raw: string): Conversation | null {
     try {
-      const value: unknown = JSON.parse(raw);
-      if (looksLikeConversation(value)) return value;
+      const conversation = parseConversation(JSON.parse(raw));
+      if (conversation) return conversation;
     } catch {
       // Reported below.
     }
@@ -137,8 +134,7 @@ export class Storage {
     });
   }
 
-  /** Every readable conversation, most recently updated first. */
-  async list(): Promise<Conversation[]> {
+  private async conversationIds(): Promise<string[]> {
     let names: string[];
     try {
       names = await fs.readdir(this.conversationsDir);
@@ -146,10 +142,65 @@ export class Storage {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
       throw err;
     }
-    const ids = names
+    return names
       .filter((n) => n.endsWith('.json'))
       .map((n) => n.slice(0, -'.json'.length))
       .filter(isValidConversationId);
+  }
+
+  /**
+   * The sidebar's view of every readable conversation, most recently updated first. Files are
+   * re-read only when they changed, so listing stays cheap however long the history grows.
+   */
+  async listEntries(): Promise<ListEntry[]> {
+    const ids = await this.conversationIds();
+    const present = new Set(ids);
+    for (const id of this.listCache.keys()) if (!present.has(id)) this.listCache.delete(id);
+
+    const entries = await Promise.all(
+      ids.map(async (id) => {
+        const file = this.fileFor(id);
+        let stat: { mtimeMs: number; size: number };
+        try {
+          stat = await fs.stat(file);
+        } catch {
+          this.listCache.delete(id);
+          return null;
+        }
+        const cached = this.listCache.get(id);
+        if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) return cached.entry;
+        let conversation: Conversation | null;
+        try {
+          conversation = await this.load(id);
+        } catch {
+          conversation = null;
+        }
+        const entry: ListEntry | null = conversation
+          ? {
+              summary: {
+                id: conversation.id,
+                title: conversation.title,
+                createdAt: conversation.createdAt,
+                updatedAt: conversation.updatedAt,
+                turnCount: conversation.turns.length,
+              },
+              hasRunningTurn: conversation.turns.some((t) => t.status === 'running'),
+            }
+          : null;
+        this.listCache.set(id, { mtimeMs: stat.mtimeMs, size: stat.size, entry });
+        return entry;
+      }),
+    );
+    const list = entries.filter((e): e is ListEntry => e !== null);
+    list.sort((a, b) =>
+      a.summary.updatedAt < b.summary.updatedAt ? 1 : a.summary.updatedAt > b.summary.updatedAt ? -1 : 0,
+    );
+    return list;
+  }
+
+  /** Every readable conversation, most recently updated first. */
+  async list(): Promise<Conversation[]> {
+    const ids = await this.conversationIds();
     const loaded = await Promise.all(
       ids.map(async (id) => {
         try {

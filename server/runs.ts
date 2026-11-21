@@ -60,7 +60,7 @@ export class Run {
   start(conversation: Conversation): void {
     if (this.started) return;
     this.started = true;
-    void runTurn({
+    runTurn({
       conversation,
       plan: this.plan,
       settings: this.settings,
@@ -69,6 +69,14 @@ export class Run {
       emit: (event) => this.handle(event),
       signal: this.abort.signal,
       control: this.control,
+    }).catch((err: unknown) => {
+      // runTurn is written never to reject; if it does, release the conversation regardless.
+      console.error('[runs] A turn ended abnormally:', err);
+      const turn = this.turn;
+      turn.status = 'error';
+      turn.error = turn.error ?? 'Something went wrong while running this turn.';
+      turn.finishedAt = turn.finishedAt ?? new Date().toISOString();
+      this.handle({ type: 'turn.end', turn: structuredClone(turn) });
     });
   }
 

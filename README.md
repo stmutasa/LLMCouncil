@@ -4,6 +4,10 @@ LLM Council is a local web app with a chat interface. You ask a question, a coun
 
 The design draws on three earlier ideas. Andrej Karpathy's llm-council introduced the pattern of independent answers, anonymous peer ranking and a chairman who writes the result. Councily added roles, debate between models and @mentions. OpenRouter Fusion showed that the arbiter should compare the answers instead of counting votes: it reports consensus, contradictions, unique insights and blind spots, then writes one answer.
 
+![The final answer from a three-member council, with the deliberation collapsed above it](docs/screenshot-answer.png)
+
+![The peer review round: label legend, leaderboard, and one reviewer's critique with its extracted ranking](docs/screenshot-deliberation.png)
+
 ## Quick start
 
 You need Node.js 20 or newer. You do not need any of the vendor CLIs to start the app, but the council is only useful once at least one is installed (see the next section).
@@ -180,11 +184,13 @@ What the app cannot guarantee: your subscription quota limits still apply and th
 
 ## What has and has not been tested
 
-**Claude** was tested end to end against Claude Code 2.1.330 with a signed-in subscription, including a three-round council.
+**Claude** was tested end to end against Claude Code 2.1.330 with a signed-in subscription, through the browser interface: two- and three-round councils, direct mode with an @mention, web search, and follow-up questions. Every call reported subscription billing.
 
 **ChatGPT** has not been tested with a signed-in account. The arguments were checked against Codex CLI 0.171.0, and the output parser was checked against the documented event stream and a captured signed-out run.
 
 **Gemini** was built from Google's Antigravity CLI headless documentation. It has not been run at all.
+
+**The interface** was tested in a browser against the real server using the demo provider: all four built-in protocols, direct mode, failing members, a failing arbiter, stop, skip to verdict, regenerate, reloading and restarting the server mid-run, every settings tab, both themes, and a 375-pixel-wide phone layout.
 
 **Windows** process handling (finding the command, ending process trees) is implemented but untested.
 
@@ -271,11 +277,12 @@ Set the seat's provider to `ollama` and its model to a name you have pulled, for
 
 ## Safety model
 
-- The server listens on 127.0.0.1 by default and answers only requests addressed to `localhost`, `127.0.0.1` or `[::1]` (or the host you pass to `--host`). It rejects requests with a foreign Host or Origin header, which blocks DNS rebinding and cross-site requests. It also rejects request bodies that are not `application/json`.
-- Each CLI call runs in a fresh, empty temporary directory that is deleted afterwards, so models have no project files to read.
+- The server listens on 127.0.0.1 by default and answers only requests addressed to `localhost`, `127.0.0.1` or `[::1]` (or the host you pass to `--host`), which blocks DNS rebinding. A request that carries an Origin header is accepted only when that origin is the same address the request was sent to, so neither another website nor another program's web server on your computer can call the API. Requests that the browser marks as cross-site are rejected, and so are request bodies that are not `application/json`.
+- Each CLI call runs in a fresh, empty temporary directory that is deleted afterwards, so models start with no project files in front of them.
 - Claude runs with all tools disabled. When Web search is on, only WebSearch and WebFetch are enabled. It also runs without slash commands, session persistence or settings files.
-- Codex runs in its read-only sandbox, without your user config, with project docs disabled.
-- Antigravity runs in its default headless permission mode. It offers no flag to disable its tools, so the prompt tells the model not to run commands, but that is an instruction and not an enforced restriction.
+- Codex runs in its read-only sandbox, without your user config, with project docs disabled. Read-only stops it changing anything, but it does not stop it reading files on your computer.
+- Antigravity runs in its default headless permission mode. It offers no flag to disable its tools, so the prompt tells the model not to run commands, but that is an instruction and not an enforced restriction. Once Test works for the Gemini seat, consider adding `--sandbox` under Extra arguments on its provider card; Google documents that flag as running with terminal sandbox restrictions.
+- Each model is shown the other models' answers, and with Web search on, text from web pages. The prompts mark that material as something to evaluate and not as instructions, but a model can still be misled by text it reads. For the Codex and Antigravity seats, which keep some access to your machine, that is a reason to leave Web search off when you are working with anything sensitive.
 
 ## Development
 

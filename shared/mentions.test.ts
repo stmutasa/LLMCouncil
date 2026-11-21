@@ -42,6 +42,20 @@ describe('parseMentions', () => {
     expect(parseMentions('(@gemini) hi', members).memberIds).toEqual(['m']);
   });
 
+  it('leaves the rest of the message exactly as typed', () => {
+    const code = 'why does this fail?\n```py\ndef f():\n    if x :\n        return 1\n```\nand `ls -la .`';
+    expect(parseMentions(`@claude ${code}`, members)).toEqual({ memberIds: ['c'], cleaned: code });
+    expect(parseMentions('.env is committed @claude', members).cleaned).toBe('.env is committed');
+    expect(parseMentions('. hi @claude', members).cleaned).toBe('. hi');
+    expect(parseMentions('a  b @gemini c  d', members).cleaned).toBe('a  b c  d');
+  });
+
+  it('tidies only the text touching a removed mention', () => {
+    expect(parseMentions('ask @gemini now', members).cleaned).toBe('ask now');
+    expect(parseMentions('first line\n@claude second line', members).cleaned).toBe('first line\nsecond line');
+    expect(parseMentions('@claude, @gemini: compare X , Y', members)).toEqual({ memberIds: ['c', 'm'], cleaned: 'compare X , Y' });
+  });
+
   it('gives an empty question when only mentions were typed', () => {
     expect(parseMentions('@claude @gemini', members)).toEqual({ memberIds: ['c', 'm'], cleaned: '' });
   });

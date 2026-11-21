@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import { buildChildEnv } from './env';
-import { liveChildCount, runProcess, type ProcOptions } from './proc';
+import { liveChildCount, runProcess, type ProcOptions, losesMultilineArgs } from './proc';
 import { isAbortError } from './types';
 
 const FAKE = fileURLToPath(new URL('./fixtures/fake-cli.mjs', import.meta.url));
@@ -204,5 +204,27 @@ describe('runProcess', () => {
   it('ignores EPIPE when the CLI exits without reading a large stdin', async () => {
     const res = await runProcess(opts(['exit', '0'], { stdin: 'y'.repeat(5_000_000) }));
     expect(res.exitCode).toBe(0);
+  });
+});
+
+describe('losesMultilineArgs', () => {
+  const viaShell = () => ({ command: 'C:\\Windows\\system32\\cmd.exe' });
+  const direct = (command: string) => ({ command });
+
+  it('is only a concern on Windows, and only for multi-line arguments', () => {
+    expect(losesMultilineArgs('tool.cmd', ['line one\nline two'], 'linux', viaShell)).toBe(false);
+    expect(losesMultilineArgs('tool.cmd', ['one line'], 'win32', viaShell)).toBe(false);
+  });
+
+  it('flags command scripts and anything cross-spawn would run through cmd.exe', () => {
+    expect(losesMultilineArgs('tool.cmd', ['a\nb'], 'win32', direct)).toBe(true);
+    expect(losesMultilineArgs('tool.BAT', ['a\r\nb'], 'win32', direct)).toBe(true);
+    expect(losesMultilineArgs('gemini', ['a\nb'], 'win32', viaShell)).toBe(true);
+  });
+
+  it('lets native executables through', () => {
+    expect(losesMultilineArgs('C:\\bin\\agy.exe', ['a\nb'], 'win32', viaShell)).toBe(false);
+    expect(losesMultilineArgs('agy', ['a\nb'], 'win32', direct)).toBe(false);
+    expect(losesMultilineArgs('agy', ['a\nb'], 'win32', undefined)).toBe(false);
   });
 });

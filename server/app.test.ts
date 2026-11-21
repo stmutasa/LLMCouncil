@@ -131,14 +131,33 @@ describe('security middleware', () => {
     }
   });
 
-  it('checks the Origin header when present', async () => {
-    expect((await request('GET', '/api/meta', { headers: { origin: 'http://localhost:5173' } })).status).toBe(200);
+  it('accepts an Origin only when it is the address the request was sent to', async () => {
+    expect((await request('GET', '/api/meta', { headers: { origin: `http://127.0.0.1:${port}` } })).status).toBe(200);
+    // The Vite dev server forwards requests with its own Host header, so page and target still match.
+    const viaDevProxy = { host: 'localhost:5173', origin: 'http://localhost:5173' };
+    expect((await request('GET', '/api/meta', { headers: viaDevProxy })).status).toBe(200);
+    // A page served by some other program on this computer is a different origin.
+    for (const origin of ['http://localhost:5173', `http://localhost:${port}`, `http://127.0.0.1:${port + 1}`]) {
+      const res = await request('POST', '/api/turns', { headers: { origin }, body: { message: 'x' } });
+      expect(res.status, origin).toBe(403);
+    }
     for (const origin of ['http://evil.example', 'null', 'file://', 'http://127.0.0.1.evil.example']) {
       const res = await request('GET', '/api/meta', { headers: { origin } });
       expect(res.status).toBe(403);
       expect(res.json().error).toMatch(/Cross-origin/);
     }
     expect((await request('POST', '/api/turns', { headers: { origin: 'http://evil.example' }, body: { message: 'x' } })).status).toBe(403);
+  });
+
+  it('rejects requests that the browser marks as coming from another site', async () => {
+    for (const site of ['cross-site', 'same-site']) {
+      const res = await request('GET', '/api/providers', { headers: { 'sec-fetch-site': site } });
+      expect(res.status, site).toBe(403);
+      expect(res.json().error).toMatch(/Cross-site/);
+    }
+    for (const site of ['same-origin', 'none']) {
+      expect((await request('GET', '/api/meta', { headers: { 'sec-fetch-site': site } })).status, site).toBe(200);
+    }
   });
 
   it('requires JSON bodies on writes and sends no CORS headers', async () => {
@@ -149,7 +168,7 @@ describe('security middleware', () => {
       body: 'a=b',
     });
     expect(form.status).toBe(415);
-    const ok = await request('GET', '/api/meta', { headers: { origin: `http://localhost:${port}` } });
+    const ok = await request('GET', '/api/meta', { headers: { origin: `http://127.0.0.1:${port}` } });
     expect(ok.headers['access-control-allow-origin']).toBeUndefined();
     expect((await request('POST', '/api/turns', { headers: { 'content-type': 'application/json; charset=utf-8' }, body: '{}' })).status).toBe(400);
   });
@@ -442,6 +461,25 @@ describe('turns over HTTP', () => {
     await writeFile(file, JSON.stringify(conv));
     await get('/api/conversations');
     expect((JSON.parse(await readFile(file, 'utf8')) as Conversation).turns[0]!.status).toBe('interrupted');
+  });
+
+  it('survives conversation files that do not have the expected shape', async () => {
+    const turns: unknown[] = [{ id: 'old', status: 'complete', userMessage: 'hi' }, { id: 'old', status: 'running' }];
+    const ids: string[] = [];
+    for (const turn of turns) {
+      const id = randomUUID();
+      ids.push(id);
+      const broken = { id, title: 'Broken', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', turns: [turn] };
+      await writeFile(path.join(dir, 'conversations', `${id}.json`), JSON.stringify(broken));
+    }
+    const list = await get('/api/conversations');
+    expect(list.status).toBe(200);
+    expect((list.json() as { id: string }[]).some((c) => ids.includes(c.id))).toBe(false);
+    for (const id of ids) {
+      expect((await get(`/api/conversations/${id}`)).status).toBe(404);
+      expect((await post('/api/turns', { conversationId: id, message: 'follow up' })).status).toBe(404);
+    }
+    expect((await get('/api/meta')).status).toBe(200);
   });
 
   it('returns 404 for unknown turns and 400 for malformed ids on the event stream', async () => {

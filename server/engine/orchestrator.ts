@@ -640,6 +640,19 @@ export async function runTurn(input: OrchestratorInput): Promise<void> {
       console.error('[orchestrator] Event listener failed:', err);
     }
   };
-  const runner = new TurnRunner({ ...input, emit });
-  await runner.run();
+  try {
+    const runner = new TurnRunner({ ...input, emit });
+    await runner.run();
+  } catch (err) {
+    // Reached only if setting up or finishing the run itself fails. The turn must still end,
+    // or the conversation would stay blocked as "running".
+    console.error('[orchestrator] The turn could not be run:', err);
+    const turn = input.plan.turn;
+    settleOpenParts(turn);
+    turn.status = 'error';
+    turn.error = `Something went wrong while running this turn: ${errorMessage(err)}`;
+    turn.finishedAt = turn.finishedAt ?? new Date().toISOString();
+    input.control.phase = 'finished';
+    emit({ type: 'turn.end', turn: clone(turn) });
+  }
 }

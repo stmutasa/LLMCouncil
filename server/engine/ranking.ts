@@ -1,10 +1,36 @@
 import type { LeaderboardEntry } from '../../shared/types';
 
-// "FINAL RANKING", optionally wrapped in **, __ or preceded by #s, optionally followed by a colon
-// (inside or outside the emphasis).
-const MARKER_RE = /(?:#{1,6}[ \t]*)?(?:\*\*|__)?[ \t]*FINAL[ \t]+RANKING[ \t]*:?[ \t]*(?:\*\*|__)?[ \t]*:?/gi;
+// "FINAL RANKING" at the start of a line, optionally decorated (#s, **, __, a quote mark) and
+// followed by a colon. The rest of the line must be empty or begin the list itself, so prose
+// such as "This final ranking reflects accuracy." is not taken for the marker.
+const MARKER_RE =
+  /^[ \t>]*(?:#{1,6}[ \t]*)?(?:\*\*|__)?[ \t]*FINAL[ \t]+RANKING[ \t]*:?[ \t]*(?:\*\*|__)?[ \t]*:?[ \t]*(?=$|\d|[-*•][ \t]|(?:\*\*|__)?Response\b)/gim;
+// An item number at the start of a line, or after a comma/semicolon in a one-line list.
+const ITEM_NUMBER_RE = /(?:^|[,;])[ \t>]*\d+[ \t]*[.):]/gm;
+// "1. C" on a line of its own.
+const NUMBERED_BARE_RE = /^[ \t>]*\d+[ \t]*[.):][ \t]*(?:\*\*|__|\*|_)?[ \t]*([A-Za-z])(?:\*\*|__|\*|_)?[ \t]*[.,;]?[ \t]*$/gm;
 const RESPONSE_LABEL_RE = /\bResponse[ \t]+\**[ \t]*([A-Za-z])(?![A-Za-z0-9])/gi;
-const NUMBERED_LINE_RE = /^[ \t]*\d+[ \t]*[.)][ \t]*(?:\*\*|__|\*|_)?[ \t]*([A-Za-z])(?![A-Za-z0-9])/gm;
+const FIRST_RESPONSE_LABEL_RE = /\bResponse[ \t]+\**[ \t]*([A-Za-z])(?![A-Za-z0-9])/i;
+
+function labels(text: string, re: RegExp): string[] {
+  return [...text.matchAll(re)].map((m) => m[1]!.toUpperCase());
+}
+
+/**
+ * The first label of each numbered item. A label mentioned later in the same item
+ * ("1. Response C (better than Response B)") is commentary, not a rank.
+ */
+function numberedItemLabels(section: string): string[] {
+  const items = [...section.matchAll(ITEM_NUMBER_RE)];
+  const found: string[] = [];
+  items.forEach((item, i) => {
+    const from = item.index + item[0].length;
+    const to = i + 1 < items.length ? items[i + 1]!.index : section.length;
+    const label = FIRST_RESPONSE_LABEL_RE.exec(section.slice(from, to))?.[1];
+    if (label) found.push(label.toUpperCase());
+  });
+  return found;
+}
 
 /**
  * Extracts the ranked labels (best first) from a review. Only the text after the last ranking
@@ -16,8 +42,10 @@ export function parseRanking(text: string, validLabels: string[]): string[] | nu
   if (lastEnd < 0) return null;
   const after = text.slice(lastEnd);
 
-  let found = [...after.matchAll(RESPONSE_LABEL_RE)].map((m) => m[1]!.toUpperCase());
-  if (found.length === 0) found = [...after.matchAll(NUMBERED_LINE_RE)].map((m) => m[1]!.toUpperCase());
+  // Numbered items first; an unnumbered list ("- Response C", "C > A > B") is the last resort.
+  let found = numberedItemLabels(after);
+  if (found.length === 0) found = labels(after, NUMBERED_BARE_RE);
+  if (found.length === 0) found = labels(after, RESPONSE_LABEL_RE);
 
   const valid = new Set(validLabels);
   const ranking: string[] = [];

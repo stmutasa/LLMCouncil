@@ -109,3 +109,28 @@ describe('buildLeaderboard', () => {
     expect(buildLeaderboard([], labels)).toBeNull();
   });
 });
+
+describe('parseRanking with reviewer wording around the list', () => {
+  const valid = ['A', 'B', 'C'];
+  const cases: [string, string, string[] | null][] = [
+    [
+      'prose after the list that repeats the words "final ranking"',
+      'FINAL RANKING:\n1. Response C\n2. Response A\n3. Response B\n\nThis final ranking reflects accuracy.',
+      ['C', 'A', 'B'],
+    ],
+    [
+      'another label mentioned as commentary on an item',
+      'FINAL RANKING:\n1. Response C (better than Response B)\n2. Response A\n3. Response B',
+      ['C', 'A', 'B'],
+    ],
+    ['a one-line list', 'FINAL RANKING: 1. Response A, 2. Response B, 3. Response C', ['A', 'B', 'C']],
+    ['an item whose label is not its first word', 'FINAL RANKING:\n1. A thorough answer wins: Response B\n2. Response A', ['B', 'A']],
+    ['a quoted block', '> FINAL RANKING:\n> 1. Response C\n> 2. Response B', ['C', 'B']],
+    ['an unnumbered chain', 'FINAL RANKING:\nResponse B > Response A > Response C', ['B', 'A', 'C']],
+    ['Windows line endings', 'FINAL RANKING:\r\n1. Response C\r\n2. Response A\r\n', ['C', 'A']],
+    ['the words in prose only', 'My final ranking is hard to give.\nResponse A, then Response B.', null],
+  ];
+  it.each(cases)('handles %s', (_name, text, expected) => {
+    expect(parseRanking(text, valid)).toEqual(expected);
+  });
+});

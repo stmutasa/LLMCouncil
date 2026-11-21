@@ -191,7 +191,7 @@ function ProviderCard({ info, value, savedValue, timeoutError, onChange }: Provi
           </Field>
         )}
         {info.id === 'antigravity' && (
-          <Field label="Prompt delivery">
+          <Field label="Prompt delivery" className="span-2">
             {({ id }) => (
               <select
                 id={id}
@@ -199,7 +199,7 @@ function ProviderCard({ info, value, savedValue, timeoutError, onChange }: Provi
                 value={value.promptMode}
                 onChange={(e) => onChange({ promptMode: e.target.value === 'arg' ? 'arg' : 'stdin' })}
               >
-                <option value="stdin">Standard input stream (default, no length limit)</option>
+                <option value="stdin">Standard input (default, no length limit)</option>
                 <option value="arg">Command-line argument</option>
               </select>
             )}

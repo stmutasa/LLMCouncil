@@ -230,16 +230,17 @@ export async function createApp(options: AppOptions): Promise<CouncilApp> {
   });
 
   api.get('/conversations', async (_req, res) => {
-    const list = await storage.list();
+    const entries = await storage.listEntries();
     const out = await Promise.all(
-      list.map(async (c) => {
-        if (!runs.has(c.id) && c.turns.some((t) => t.status === 'running')) {
-          const repaired = await storage.update(c.id, (x) => {
-            if (!runs.has(c.id)) repairRunning(x);
+      entries.map(async (entry) => {
+        const id = entry.summary.id;
+        if (entry.hasRunningTurn && !runs.has(id)) {
+          const repaired = await storage.update(id, (x) => {
+            if (!runs.has(id)) repairRunning(x);
           });
-          return summarize(repaired ?? c, runs.has(c.id));
+          if (repaired) return summarize(repaired, runs.has(id));
         }
-        return summarize(c, runs.has(c.id));
+        return { ...entry.summary, running: runs.has(id) };
       }),
     );
     res.json(out);

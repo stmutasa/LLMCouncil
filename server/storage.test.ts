@@ -102,4 +102,49 @@ describe('Storage', () => {
     await storage.list();
     expect(warn).toHaveBeenCalledTimes(1);
   });
+
+  it('treats a file whose turns lack required fields as unreadable', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const good = randomUUID();
+    await storage.create(conversation(good, '2026-01-01T00:00:00.000Z'));
+    const shapes: unknown[] = [
+      { id: 'old', status: 'complete', userMessage: 'hi' },
+      { id: 'old', status: 'running' },
+      'not an object',
+    ];
+    for (const turn of shapes) {
+      const id = randomUUID();
+      const broken = { id, title: 't', createdAt: 'x', updatedAt: 'x', turns: [turn] };
+      await writeFile(path.join(dir, 'conversations', `${id}.json`), JSON.stringify(broken));
+      expect(await storage.load(id)).toBeNull();
+      expect(await storage.update(id, () => undefined)).toBeNull();
+    }
+    expect((await storage.list()).map((c) => c.id)).toEqual([good]);
+    expect((await storage.listEntries()).map((e) => e.summary.id)).toEqual([good]);
+  });
+
+  it('lists entries from a cache that follows changes to the files', async () => {
+    const a = randomUUID();
+    const b = randomUUID();
+    await storage.create(conversation(a, '2026-01-01T00:00:00.000Z'));
+    await storage.create(conversation(b, '2026-03-01T00:00:00.000Z'));
+    expect((await storage.listEntries()).map((e) => e.summary.id)).toEqual([b, a]);
+
+    const load = vi.spyOn(storage, 'load');
+    await storage.listEntries();
+    expect(load).not.toHaveBeenCalled();
+
+    await storage.update(a, (c) => {
+      c.title = 'Renamed conversation';
+      c.updatedAt = '2026-06-01T00:00:00.000Z';
+    });
+    const afterUpdate = await storage.listEntries();
+    expect(afterUpdate.map((e) => e.summary.id)).toEqual([a, b]);
+    expect(afterUpdate[0]!.summary.title).toBe('Renamed conversation');
+    expect(afterUpdate[0]!.hasRunningTurn).toBe(false);
+    expect(load).toHaveBeenCalledTimes(1);
+
+    await storage.delete(b);
+    expect((await storage.listEntries()).map((e) => e.summary.id)).toEqual([a]);
+  });
 });
