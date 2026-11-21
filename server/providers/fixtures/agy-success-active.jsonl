@@ -1,0 +1,8 @@
+{"event":"init","conversation_id":"conv-1","init":{"cwd":"/tmp/x","tools":["run_command"],"permission_mode":"default","model":"gemini-4-neon-high"}}
+{"event":"step_update","step_update":{"step_index":0,"state":"DONE","step_type":"user_input"}}
+{"event":"step_update","step_update":{"step_index":1,"state":"ACTIVE","step_type":"agent_response","text_delta":"Hello"}}
+{"event":"step_update","step_update":{"step_index":1,"state":"ACTIVE","step_type":"agent_response","text_delta":", wor"}}
+{"event":"step_update","step_update":{"step_index":1,"state":"ACTIVE","step_type":"agent_response","text_delta":"ld — ünïcode ✓"}}
+{"event":"step_update","step_update":{"step_index":1,"state":"DONE","step_type":"agent_response","text_delta":""}}
+{"event":"step_update","step_update":{"step_index":2,"state":"DONE","step_type":"checkpoint"}}
+{"event":"result","conversation_id":"conv-1","result":{"status":"SUCCESS","response":"Hello, world — ünïcode ✓","error":""}}

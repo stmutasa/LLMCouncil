@@ -1,0 +1,77 @@
+{"type":"active_goal"}
+{"type":"autocompact_state"}
+{"type":"system","subtype":"init","model":"claude-haiku-5-5","apiKeySource":"none","tools":["WebFetch","WebSearch"]}
+{"type":"system","subtype":"status"}
+{"type":"stream_event","event":{"type":"message_start","message":{"model":"claude-haiku-5-5","role":"assistant"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Let me check the current release schedule."}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_stop","index":0},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","name":"WebSearch"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":""}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"query\": \"current"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":" Node.js L"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"TS version 2026"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\", \"mode\": \"standard"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\"}"}},"parent_tool_use_id":null}
+{"type":"assistant","message":{"model":"claude-haiku-5-5","role":"assistant","content":[{"type":"tool_use","name":"WebSearch","input":{"query":"current Node.js LTS version 2026","mode":"standard"}}]}}
+{"type":"stream_event","event":{"type":"content_block_stop","index":0},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"message_delta","delta":{"stop_reason":"tool_use"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"message_stop"},"parent_tool_use_id":null}
+{"type":"rate_limit_event","rate_limit_info":{"status":"allowed"}}
+{"type":"system","subtype":"task_summary"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"Web search results (reduced for the fixture)."}]}}
+{"type":"system","subtype":"status"}
+{"type":"stream_event","event":{"type":"message_start","message":{"model":"claude-haiku-5-5","role":"assistant"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"thinking"}},"parent_tool_use_id":null}
+{"type":"system","subtype":"thinking_tokens"}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":""}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":""}},"parent_tool_use_id":null}
+{"type":"system","subtype":"thinking_tokens"}
+{"type":"assistant","message":{"model":"claude-haiku-5-5","role":"assistant","content":[{"type":"thinking"}]}}
+{"type":"stream_event","event":{"type":"content_block_stop","index":0},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"text"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Node.js 26 should"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" be the current st"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"able LTS line as"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" of November 2026, since"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" its sc"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"heduled prom"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"otion to LTS was October"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" 28"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":", 2026, though the search"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" results con"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"flicted and"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" you"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" should conf"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"irm on"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" ["}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"nodejs.org](https"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"://nodejs.org/"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"en/about/previous-rele"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ases).\n\nSources:"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"\n- [n"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"odejs v26 released]("}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"https://www.inmotion"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"hosting.com/support/"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"news/nodejs-v"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"26-released.md)\n-"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" [Evolving the Node"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":".js Release Schedule"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"](https://nodejs."}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"org/blog/announcements"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"/evolving-the-n"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"odejs-release-sched"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ule)\n- [Node."}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"js LTS Versions"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Explained]("}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"https://seahawkmed"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ia.com/nodejs"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"/nodejs-lts"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"-versions/)"}},"parent_tool_use_id":null}
+{"type":"assistant","message":{"model":"claude-haiku-5-5","role":"assistant","content":[{"type":"text","text":"Node.js 26 should be the current stable LTS line as of November 2026, since its scheduled promotion to LTS was October 28, 2026, though the search results conflicted and you should confirm on [nodejs.org](https://nodejs.org/en/about/previous-releases).\n\nSources:\n- [nodejs v26 released](https://www.inmotionhosting.com/support/news/nodejs-v26-released.md)\n- [Evolving the Node.js Release Schedule](https://nodejs.org/blog/announcements/evolving-the-nodejs-release-schedule)\n- [Node.js LTS Versions Explained](https://seahawkmedia.com/nodejs/nodejs-lts-versions/)"}]}}
+{"type":"stream_event","event":{"type":"content_block_stop","index":1},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"message_delta","delta":{"stop_reason":"end_turn"}},"parent_tool_use_id":null}
+{"type":"stream_event","event":{"type":"message_stop"},"parent_tool_use_id":null}
+{"type":"system","subtype":"post_turn_summary"}
+{"type":"result","subtype":"success","is_error":false,"result":"Node.js 26 should be the current stable LTS line as of November 2026, since its scheduled promotion to LTS was October 28, 2026, though the search results conflicted and you should confirm on [nodejs.org](https://nodejs.org/en/about/previous-releases).\n\nSources:\n- [nodejs v26 released](https://www.inmotionhosting.com/support/news/nodejs-v26-released.md)\n- [Evolving the Node.js Release Schedule](https://nodejs.org/blog/announcements/evolving-the-nodejs-release-schedule)\n- [Node.js LTS Versions Explained](https://seahawkmedia.com/nodejs/nodejs-lts-versions/)","stop_reason":"end_turn","num_turns":2}
+{"type":"system","subtype":"task_summary"}

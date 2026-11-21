@@ -1,0 +1,2 @@
+Plain answer line one.
+[32mSecond line in green.[0m

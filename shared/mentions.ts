@@ -46,7 +46,9 @@ export function parseMentions(message: string, members: MentionTarget[]): Parsed
     memberIds,
     cleaned: cleaned
       .replace(/[ \t]{2,}/g, ' ')
-      .replace(/^[ \t]*[,:;.]+[ \t]*/, '')
+      // "@a and @b, what…" leaves "and , what…": close the gap before punctuation.
+      .replace(/[ \t]+([,.;:!?])/g, '$1')
+      .replace(/^[ \t]*(?:and\b[ \t]*)?[,:;.]+[ \t]*/i, '')
       .trim(),
   };
 }

@@ -1,0 +1,14 @@
+{"type":"thread.started","thread_id":"00000000-0000-0000-0000-000000000000"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_0","type":"reasoning","text":""}}
+{"type":"item.completed","item":{"id":"item_0","type":"reasoning","text":"**Considering the question**"}}
+{"type":"item.started","item":{"id":"item_1","type":"web_search","query":"example"}}
+{"type":"item.completed","item":{"id":"item_1","type":"web_search","query":"example"}}
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"A first draft that is superseded."}}
+{"type":"item.started","item":{"id":"item_3","type":"command_execution","command":"ls","status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_3","type":"command_execution","command":"ls","status":"completed","exit_code":0}}
+{"type":"some.future_event","payload":{"x":1}}
+not json at all
+{"type":"item.updated","item":{"id":"item_4","type":"agent_message","text":"## Answer\n\nUse the"}}
+{"type":"item.completed","item":{"id":"item_4","type":"agent_message","text":"## Answer\n\nUse the standard approach — it handles “edge cases” well."}}
+{"type":"turn.completed","usage":{"input_tokens":1200,"cached_input_tokens":0,"output_tokens":40}}

@@ -376,7 +376,7 @@ export interface MetaResponse {
  * The stream always begins with 'snapshot' (the full turn as it stands, including partial text),
  * so a client can subscribe or re-subscribe at any time. 'member.end', 'round.end', 'arbiter.end'
  * and 'turn.end' carry authoritative full objects that replace whatever the client accumulated.
- * 'turn.end' is always the last event.
+ * 'turn.end' is always the last event. `round` is the 0-based index into `turn.rounds`.
  */
 export type RunEvent =
   | { type: 'snapshot'; turn: Turn }
