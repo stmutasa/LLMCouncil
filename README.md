@@ -90,6 +90,12 @@ Open Settings and choose the Providers tab to check each CLI. Each card shows:
 
 Warnings appear on the card when the CLI is signed in with an API key or when Antigravity overage credits are enabled. See "How it avoids API charges".
 
+### Models and reasoning effort
+
+Every seat starts with an empty model, which means the CLI's own default model for your plan. To pin one, open Settings, then Council, and type a model name or pick a suggestion. For ChatGPT and Gemini, "Load models" asks the CLI for its current list (`codex debug models`, `agy models`), which is more reliable than the built-in suggestions because model names change often.
+
+Effort is also empty by default, with one exception: the ChatGPT seat starts at `high`, because Codex sets most of its models to low reasoning effort by default, which suits a coding agent better than a deliberation. Change it per seat as you like. Antigravity model names already include an effort level (for example `gemini-4-neon-high`).
+
 ## Using it
 
 The composer at the bottom of the page has three controls next to the text box.
@@ -232,6 +238,8 @@ Everything is under the data directory. `settings.json` holds your seats, protoc
 ### Adding a custom provider
 
 A custom provider is any command that reads a prompt and prints its answer as plain text to stdout. Add it to `customProviders` in `settings.json` while the app is stopped, then start the app again. The provider then appears in the Providers tab and can be chosen for any seat or the arbiter.
+
+`settings.json` is created the first time you save a change in Settings. If it does not exist yet, you can create it with only the `customProviders` key; every other setting is filled in from the defaults.
 
 Each entry has these fields:
 
