@@ -124,22 +124,40 @@ export async function listDirectories(input: string | undefined, opts: DirOption
   }
 }
 
-export type Spawner = (command: string, args: string[]) => void;
+export interface RevealCommand {
+  command: string;
+  args: string[];
+  /** Pass the arguments to the program exactly as written (Windows only). */
+  verbatim: boolean;
+}
 
-const defaultSpawner: Spawner = (command, args) => {
-  const child = spawn(command, args, { stdio: 'ignore', detached: true, shell: false, windowsHide: false });
+export type Spawner = (command: string, args: string[], verbatim: boolean) => void;
+
+const defaultSpawner: Spawner = (command, args, verbatim) => {
+  const child = spawn(command, args, {
+    stdio: 'ignore',
+    detached: true,
+    shell: false,
+    windowsHide: false,
+    windowsVerbatimArguments: verbatim,
+  });
   child.on('error', (err) => console.warn(`[library] Could not open the file manager: ${err.message}`));
   child.unref();
 };
 
 /** The command that shows a file in the system file manager. Never goes through a shell. */
-export function revealCommand(file: string, platform: NodeJS.Platform = process.platform): { command: string; args: string[] } {
-  if (platform === 'darwin') return { command: 'open', args: ['-R', file] };
-  if (platform === 'win32') return { command: 'explorer.exe', args: [`/select,${file}`] };
-  return { command: 'xdg-open', args: [path.dirname(file)] };
+export function revealCommand(file: string, platform: NodeJS.Platform = process.platform): RevealCommand {
+  if (platform === 'darwin') return { command: 'open', args: ['-R', file], verbatim: false };
+  if (platform === 'win32') {
+    // Explorer splits its arguments on commas and spaces unless the path itself is quoted, so the
+    // quotes have to sit inside the argument: /select,"C:\My Files\Report, final.pdf". A Windows
+    // file name cannot contain a double quote, so the path cannot break out of them.
+    return { command: 'explorer.exe', args: [`/select,"${file.replace(/"/g, '')}"`], verbatim: true };
+  }
+  return { command: 'xdg-open', args: [path.dirname(file)], verbatim: false };
 }
 
 export function revealFile(file: string, spawner: Spawner = defaultSpawner, platform: NodeJS.Platform = process.platform): void {
-  const { command, args } = revealCommand(file, platform);
-  spawner(command, args);
+  const { command, args, verbatim } = revealCommand(file, platform);
+  spawner(command, args, verbatim);
 }

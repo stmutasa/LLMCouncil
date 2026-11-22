@@ -1404,17 +1404,27 @@ button.crumb:hover {
   overflow-wrap: anywhere;
 }
 
-.notion-steps {
+.notion-options {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
-  padding-left: 1.4em;
-  color: var(--text-secondary);
+  gap: var(--space-3);
+  list-style: none;
   font-size: var(--text-sm);
 }
 
-.notion-steps li::marker {
-  color: var(--text-muted);
+.notion-options li {
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--border);
+}
+
+.notion-option-title {
+  font-weight: var(--weight-medium);
+}
+
+.notion-option-text {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-secondary);
 }
 
 .token-row {

@@ -1,4 +1,4 @@
-import { copyFile, mkdir, mkdtemp, readdir, readFile, rename, rm, truncate, utimes, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readdir, readFile, rename, rm, symlink, truncate, utimes, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -239,6 +239,22 @@ describe('folder sync', () => {
       expect(lib.documents({}).documents.map((d) => d.title)).toEqual(['only.txt']);
     } finally {
       await rm(other, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a folder that leads to the data directory through a symbolic link', async () => {
+    const link = path.join(docs, '..', `${path.basename(docs)}-link`);
+    await symlink(path.dirname(dataDir), link);
+    try {
+      settings.library.sources = [{ id: 'docs', kind: 'folder', name: 'Linked', enabled: true, path: link }];
+      const lib = makeLibrary();
+      await lib.init();
+      const s = await status(lib);
+      expect(s.ready).toBe(false);
+      expect(s.readyDetail).toMatch(/app's own data folder/);
+      await expect(lib.requestSync('docs')).rejects.toMatchObject({ status: 409 });
+    } finally {
+      await rm(link, { force: true });
     }
   });
 

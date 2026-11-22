@@ -24,7 +24,7 @@ import { saveTurnToNotion } from './notionSave';
 import { renderParts } from './render';
 import { searchIndex, type FoundPassage } from './search';
 import { SecretsStore } from './secrets';
-import { checkFolderReady, folderPathProblem } from './sources/folder';
+import { bounded, checkFolderReady, folderPathProblem } from './sources/folder';
 import { pageTitle, readPage } from './sources/notion';
 import { DOC_ID_RE, LibraryStore } from './store';
 import { isAbort, SyncQueue, syncFolder, syncNotion, SyncStopped, type Progress, type SyncContext } from './sync';
@@ -416,7 +416,16 @@ export class Library {
     const cached = this.readyCache.get(source.id);
     const now = Date.now();
     if (!fresh && cached && cached.key === source.path && now - cached.at < READY_CACHE_MS) return cached;
-    const check = await checkFolderReady(source.path, 1_000);
+    let check = await checkFolderReady(source.path, 1_000);
+    if (check.ready) {
+      // Through symbolic links a folder can still turn out to be (or contain) the data directory.
+      const [real, data] = await Promise.all([
+        bounded(fs.realpath(source.path), 1_000).catch(() => source.path),
+        fs.realpath(this.options.dataDir).catch(() => this.options.dataDir),
+      ]);
+      const linked = folderPathProblem(real, data);
+      if (linked) check = { ready: false, detail: linked };
+    }
     this.readyCache.set(source.id, { at: now, key: source.path, ...check });
     return check;
   }
@@ -547,7 +556,7 @@ export class Library {
   /** Waits for the first index build (bounded), then searches the index as it stands. */
   async search(
     queries: string[],
-    opts: { budgetChars: number; sourceIds: string[]; signal?: AbortSignal },
+    opts: { budgetChars: number; sourceIds: string[]; excludeDocumentIds?: string[]; signal?: AbortSignal },
   ): Promise<FoundPassage[]> {
     await within(
       this.indexBuilt,

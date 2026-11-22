@@ -45,7 +45,13 @@ export function isArbiterPhase(turn: Turn): boolean {
 
 /** "Skip to verdict" applies only to council rounds that have not reached the arbiter. */
 export function canSkipToVerdict(turn: Turn): boolean {
-  return turn.status === 'running' && turn.mode === 'council' && !isArbiterPhase(turn);
+  return turn.status === 'running' && turn.mode === 'council' && !isLibraryPhase(turn) && !isArbiterPhase(turn);
+}
+
+/** The turn is still gathering material from the library (rounds have not started). */
+export function isLibraryPhase(turn: Turn): boolean {
+  const status = turn.library?.status;
+  return turn.status === 'running' && (status === 'pending' || status === 'running');
 }
 
 /** Rounds that actually ran (finished, or had at least one call start before a stop/skip). */
@@ -75,6 +81,9 @@ export function deliberationSummary(turn: Turn, now: number): DeliberationSummar
     const started = Date.parse(turn.createdAt);
     const time = Number.isNaN(started) ? '' : formatElapsed(now - started);
     if (isArbiterPhase(turn)) return { text: 'Arbiter is writing the verdict', tone: 'running', time };
+    if (isLibraryPhase(turn)) {
+      return { text: turn.library?.mode === 'off' ? 'Reading the attached documents' : 'Searching the library', tone: 'running', time };
+    }
     const pos = Math.max(0, activeRoundPosition(turn));
     const round = turn.rounds[pos];
     if (!round) return { text: 'Starting the council', tone: 'running', time };

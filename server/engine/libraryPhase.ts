@@ -36,7 +36,10 @@ export interface StoredTurnLibrary extends TurnLibrary {
 export interface LibraryAccess {
   /** Searchable (status ok) documents in the given sources. */
   searchableCount(sourceIds: string[]): number;
-  search(queries: string[], opts: { budgetChars: number; sourceIds: string[]; signal?: AbortSignal }): Promise<FoundPassage[]>;
+  search(
+    queries: string[],
+    opts: { budgetChars: number; sourceIds: string[]; excludeDocumentIds?: string[]; signal?: AbortSignal },
+  ): Promise<FoundPassage[]>;
   /** A document of a source that still exists in the settings; null otherwise. */
   document(id: string): LibraryDocument | null;
   readParts(id: string): Promise<Part[] | null>;
@@ -348,7 +351,16 @@ async function gather(
     lib.queries = queries;
     out.excerpts.push(...mentionedExcerpts(input.question, earlier));
     await step('The library could not be searched', async () => {
-      const found = await library.search(queries, { budgetChars: settings.library.excerptChars, sourceIds, signal });
+      // A document attached in full is already in the prompt; passages from it would only repeat it.
+      const excludeDocumentIds = out.outcomes
+        .filter((o) => o.text !== null && !o.attachment.truncated)
+        .map((o) => o.attachment.documentId);
+      const found = await library.search(queries, {
+        budgetChars: settings.library.excerptChars,
+        sourceIds,
+        excludeDocumentIds,
+        signal,
+      });
       out.searched = true;
       const keys = new Set(out.excerpts.map((e) => e.key).filter(Boolean));
       for (const p of found) {

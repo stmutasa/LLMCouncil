@@ -8,8 +8,9 @@ import { useStore } from '../../store';
 import { ConfirmDialog, Dialog } from '../Dialog';
 import { Spinner, WarningIcon } from '../icons';
 
-/** Where connections and personal access tokens are created. */
-const NOTION_PORTAL = 'https://www.notion.so/profile/integrations';
+/** Where Notion's two kinds of token are created. */
+const NOTION_TOKENS = 'https://www.notion.so/developers/tokens';
+const NOTION_CONNECTIONS = 'https://app.notion.com/developers/connections';
 
 /** Connect or disconnect Notion, and choose where answers are saved. The token is never shown. */
 export function NotionSection({ live }: { live: Settings }) {
@@ -187,17 +188,29 @@ function NotConnected({ tokenError }: { tokenError: string | null }) {
         </p>
       )}
       <p className="section-text small">Add your Notion pages to the library, and save council answers to Notion.</p>
-      <ol className="notion-steps">
+      <p className="section-text small">Paste either kind of Notion token:</p>
+      <ul className="notion-options">
         <li>
-          In Notion's developer portal, create an internal connection, or a personal access token.{' '}
-          <a className="text-link" href={NOTION_PORTAL} target="_blank" rel="noopener noreferrer">
-            Open the portal <ExternalLink size={12} aria-hidden="true" />
+          <span className="notion-option-title">Personal access token</span>{' '}
+          <a className="text-link" href={NOTION_TOKENS} target="_blank" rel="noopener noreferrer">
+            Create one <ExternalLink size={12} aria-hidden="true" />
           </a>
+          <span className="notion-option-text">
+            The simplest: it sees every page you can see, with no sharing needed. It expires (after at most a year), and then a new one
+            must be pasted here.
+          </span>
         </li>
-        <li>Give it permission to read content, and to insert content if answers should be saved to Notion.</li>
-        <li>In Notion, share the pages the council may read with the connection (the page's ••• menu, then Connections).</li>
-        <li>Paste its token here.</li>
-      </ol>
+        <li>
+          <span className="notion-option-title">Connection with an API token</span>{' '}
+          <a className="text-link" href={NOTION_CONNECTIONS} target="_blank" rel="noopener noreferrer">
+            Create one <ExternalLink size={12} aria-hidden="true" />
+          </a>
+          <span className="notion-option-text">
+            Sees only the pages and databases you give it access to (its Content access tab, or a page's ••• menu, then Connections).
+            Give it the read content capability, and insert content if answers should be saved to Notion.
+          </span>
+        </li>
+      </ul>
       <form
         className="token-row"
         onSubmit={(e) => {
@@ -300,7 +313,7 @@ function NotionPagePicker({ current, onClose }: { current: string | null; onClos
         </button>
       </header>
       <div className="library-dialog-body">
-        <p className="muted small">Pages shared with the connection. New answers are saved as pages inside the one you choose.</p>
+        <p className="muted small">Notion pages the token can see, at most 20 at a time; search to find others. New answers are saved as pages inside the one you choose.</p>
         <div className="search-field">
           <Search size={15} aria-hidden="true" className="search-field-icon" />
           <label htmlFor={searchId} className="visually-hidden">

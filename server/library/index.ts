@@ -31,6 +31,16 @@ const B = 0.75;
 const TITLE_WEIGHT = 2;
 const YIELD_EVERY = 200;
 
+/** Length plus FNV-1a hash: cheap, and enough to tell that a part's text is not the indexed one. */
+export function textPrint(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return `${text.length}:${h.toString(16)}`;
+}
+
 const yieldToEventLoop = () => new Promise<void>((resolve) => setImmediate(resolve));
 
 /**
@@ -39,8 +49,8 @@ const yieldToEventLoop = () => new Promise<void>((resolve) => setImmediate(resol
  * a new index can be swapped in atomically.
  */
 export class LibraryIndex {
-  /** partLengths: each part's text length when indexed, to detect text that changed since. */
-  readonly docs: { id: string; sourceId: string; partLengths: number[] }[] = [];
+  /** partPrints: a fingerprint of each part's text when indexed, to detect text that changed since. */
+  readonly docs: { id: string; sourceId: string; partPrints: string[] }[] = [];
   readonly chunks: ChunkRef[] = [];
   private readonly byId = new Map<string, number>();
   private readonly postings = new Map<string, Posting>();
@@ -75,7 +85,7 @@ export class LibraryIndex {
   private add(input: IndexDocInput): number {
     if (this.byId.has(input.id)) return 0;
     const docIndex = this.docs.length;
-    this.docs.push({ id: input.id, sourceId: input.sourceId, partLengths: input.parts.map((p) => p.text.length) });
+    this.docs.push({ id: input.id, sourceId: input.sourceId, partPrints: input.parts.map((p) => textPrint(p.text)) });
     this.byId.set(input.id, docIndex);
 
     const titleCounts = new Map<string, number>();
@@ -115,10 +125,6 @@ export class LibraryIndex {
 
   get chunkCount(): number {
     return this.chunks.length;
-  }
-
-  docIndex(id: string): number | undefined {
-    return this.byId.get(id);
   }
 
   /** Document order (by document id, then position), independent of the order of indexing. */

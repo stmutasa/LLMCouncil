@@ -1,4 +1,4 @@
-import { BookOpen, Folder, RefreshCw, Trash } from 'lucide-react';
+import { BookOpen, Folder, Info, RefreshCw, Trash } from 'lucide-react';
 import { useId, useState, type KeyboardEvent } from 'react';
 import type { LibrarySource, LibrarySourceStatus } from '../../../../shared/types';
 import { errorMessage } from '../../api';
@@ -132,9 +132,9 @@ export function SourceCard({ source, status, sources, supportedTypes, now }: Sou
         )}
 
         {source.enabled && status?.sync.error && !syncing && (
-          <p className="small source-line-text warning">
-            <WarningIcon size={13} />
-            <span>The last check stopped early: {status.sync.error}</span>
+          <p className="small source-line-text">
+            <Info size={13} aria-hidden="true" />
+            <span>{status.sync.error}</span>
           </p>
         )}
 

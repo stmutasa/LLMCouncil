@@ -187,6 +187,9 @@ describe('index and search', () => {
     const { index } = await setup([doc('d1', 'x', ['alpha beta gamma'])]);
     const changed = async () => [{ label: '', text: 'completely different text now' }];
     expect(await searchIndex(index, ['alpha'], { budgetChars: 10_000, sourceIds: ['src'] }, changed)).toEqual([]);
+    // Same length, different words: still recognised as changed.
+    const same = async () => [{ label: '', text: 'alpha gamma beta' }];
+    expect(await searchIndex(index, ['alpha'], { budgetChars: 10_000, sourceIds: ['src'] }, same)).toEqual([]);
   });
 
   it('yields to the event loop while building', async () => {

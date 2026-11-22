@@ -11,7 +11,7 @@ import {
   roundsRun,
   sortedLabels,
 } from './turn';
-import { arbiter, councilTurn, directTurn, response, round } from './testFixtures';
+import { arbiter, councilTurn, directTurn, library, response, round } from './testFixtures';
 
 const START = Date.parse('2026-01-01T10:00:00.000Z');
 
@@ -97,6 +97,11 @@ describe('turn helpers', () => {
     expect(isArbiterPhase(allRoundsDone)).toBe(true);
 
     expect(canSkipToVerdict(directTurn())).toBe(false);
+    // The server refuses a skip while the library phase runs.
+    const searching = councilTurn({ library: library({ status: 'running' }) });
+    expect(canSkipToVerdict(searching)).toBe(false);
+    expect(deliberationSummary(searching, Date.parse(searching.createdAt)).text).toBe('Searching the library');
+    expect(canSkipToVerdict(councilTurn({ library: library({ status: 'done' }) }))).toBe(true);
     expect(canSkipToVerdict(councilTurn({ status: 'complete' }))).toBe(false);
   });
 

@@ -55,6 +55,15 @@ async function pdfParts(bytes: Uint8Array): Promise<Part[]> {
 
 const htmlConverter = new NodeHtmlMarkdown({ ignore: ['nav', 'footer', 'script', 'style', 'noscript'] });
 const docxConverter = new NodeHtmlMarkdown();
+
+/**
+ * The Markdown converter escapes a full stop after a number ("2026-07-21\.") so that it cannot
+ * be read as a list marker. The text is read by models and searched, not rendered, so the
+ * backslash is only noise.
+ */
+function plainNumbers(markdown: string): string {
+  return markdown.replace(/(\d)\\\./g, '$1.');
+}
 const IMAGE_PLACEHOLDER = 'about:image';
 const IMAGE_RE = /!\[([^\]]*)\]\(about:image\)/g;
 
@@ -66,9 +75,9 @@ async function docxText(bytes: Uint8Array): Promise<string> {
       convertImage: mammoth.images.imgElement(async () => ({ src: IMAGE_PLACEHOLDER })),
     },
   );
-  return docxConverter
-    .translate(result.value)
-    .replace(IMAGE_RE, (_, alt: string) => (alt.trim() ? `[Image: ${alt.trim()}]` : ''));
+  return plainNumbers(docxConverter.translate(result.value)).replace(IMAGE_RE, (_, alt: string) =>
+    alt.trim() ? `[Image: ${alt.trim()}]` : '',
+  );
 }
 
 async function docText(bytes: Uint8Array): Promise<string> {
@@ -133,7 +142,10 @@ export async function extractBytes(bytes: Uint8Array, type: string): Promise<Ext
       }
       case 'html':
       case 'htm':
-        return finishParts([{ label: '', text: htmlConverter.translate(decoded(bytes)) }], emptyDetail(type));
+        return finishParts(
+          [{ label: '', text: plainNumbers(htmlConverter.translate(decoded(bytes))) }],
+          emptyDetail(type),
+        );
       case 'rtf':
         return finishParts([{ label: '', text: rtfToText(Buffer.from(bytes).toString('latin1')) }], emptyDetail(type));
       default:

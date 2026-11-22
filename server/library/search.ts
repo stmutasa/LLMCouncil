@@ -1,4 +1,4 @@
-import type { LibraryIndex } from './index';
+import { textPrint, type LibraryIndex } from './index';
 import { queryTerms } from './tokenize';
 import type { Part } from './types';
 
@@ -23,6 +23,8 @@ export interface SearchOptions {
   budgetChars: number;
   /** Only documents of these sources are searched. */
   sourceIds: string[];
+  /** Documents left out (attached in full already, so passages from them would repeat them). */
+  excludeDocumentIds?: string[];
 }
 
 interface Picked {
@@ -43,9 +45,10 @@ export async function searchIndex(
   loadParts: (documentId: string) => Promise<Part[] | null>,
 ): Promise<FoundPassage[]> {
   const allowedSources = new Set(opts.sourceIds);
+  const excluded = new Set(opts.excludeDocumentIds ?? []);
   const allowedDocs = new Set<number>();
   index.docs.forEach((d, i) => {
-    if (allowedSources.has(d.sourceId)) allowedDocs.add(i);
+    if (allowedSources.has(d.sourceId) && !excluded.has(d.id)) allowedDocs.add(i);
   });
   if (allowedDocs.size === 0 || opts.budgetChars <= 0) return [];
   const allow = (doc: number) => allowedDocs.has(doc);
@@ -109,7 +112,7 @@ export async function searchIndex(
     if (!partsCache.has(documentId)) partsCache.set(documentId, await loadParts(documentId));
     const part = partsCache.get(documentId)?.[first.part];
     // The document was read again after the index was built; its ranges no longer apply.
-    if (!part || part.text.length !== index.docs[first.doc]!.partLengths[first.part]) continue;
+    if (!part || textPrint(part.text) !== index.docs[first.doc]!.partPrints[first.part]) continue;
     const text = part.text.slice(first.start, last.end).trim();
     if (!text) continue;
     out.push({

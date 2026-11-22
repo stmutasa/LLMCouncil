@@ -67,7 +67,7 @@ class FakeLibrary implements LibraryAccess {
   searchableCount(ids: string[]) {
     return [...this.docs.values()].filter((d) => d.doc.status === 'ok' && ids.includes(d.doc.sourceId)).length;
   }
-  async search(queries: string[], opts: { budgetChars: number; sourceIds: string[]; signal?: AbortSignal }) {
+  async search(queries: string[], opts: { budgetChars: number; sourceIds: string[]; excludeDocumentIds?: string[]; signal?: AbortSignal }) {
     this.searches.push(queries);
     if (this.failSearch) throw this.failSearch;
     if (this.hangSearch) {
@@ -329,6 +329,14 @@ describe('library phase', () => {
     expect(prompt).toContain(CUT_MARKER);
     expect(prompt).toContain('Not included: Three.docx — the attachment budget was already used by the documents before it.');
     expect(prompt).not.toContain("## Source material from the user's library");
+  });
+
+  it('does not repeat a fully attached document as passages', async () => {
+    await freshLibrary();
+    const { turn } = await runOne({ library: lib, message: 'budget turbine facts', attachments: ['b'.repeat(20)] });
+    expect(turn.library!.attachments[0]!.problem).toBe('');
+    expect(turn.library!.excerpts.length).toBeGreaterThan(0);
+    expect(turn.library!.excerpts.some((e) => e.documentId === 'b'.repeat(20))).toBe(false);
   });
 
   it('reuses an attachment id for the same document in a later turn', async () => {
