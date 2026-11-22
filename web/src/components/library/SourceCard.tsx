@@ -138,7 +138,8 @@ export function SourceCard({ source, status, sources, supportedTypes, now }: Sou
           </p>
         )}
 
-        {error && (
+        {/* A refused check of an unreachable source repeats the reason already shown above. */}
+        {error && error !== status?.readyDetail && (
           <p className="field-error" role="alert">
             {error}
           </p>

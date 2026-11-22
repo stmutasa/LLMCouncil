@@ -73,6 +73,13 @@ export function AddFolderDialog({ sources, onClose }: AddFolderDialogProps) {
     void go(null);
   }, [go]);
 
+  // Deep paths overflow the breadcrumb bar; keep the current folder (the end) in view.
+  const crumbsRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const el = crumbsRef.current;
+    if (el) el.scrollLeft = el.scrollWidth;
+  }, [listing]);
+
   const { drive, other } = splitShortcuts(shortcuts);
   const crumbs = listing ? breadcrumbs(listing.path) : [];
   const pathError = validateFolderPath(path, sources);
@@ -194,7 +201,7 @@ export function AddFolderDialog({ sources, onClose }: AddFolderDialogProps) {
             >
               <CornerLeftUp size={15} aria-hidden="true" />
             </button>
-            <nav className="crumbs" aria-label="Folder path">
+            <nav className="crumbs" aria-label="Folder path" ref={crumbsRef}>
               <ol>
                 {crumbs.map((c, i) => (
                   <li key={c.path}>

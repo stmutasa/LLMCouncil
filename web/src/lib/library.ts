@@ -71,7 +71,10 @@ export interface StatusLine {
 export function sourceStatusLine(status: LibrarySourceStatus, now: number): StatusLine {
   if (!status.ready) {
     const fallback = status.source.kind === 'folder' ? 'This folder cannot be read.' : 'Notion is not connected.';
-    return { text: status.readyDetail.trim() || fallback, tone: 'warning' };
+    const kept = status.counts.ok ?? 0;
+    // Documents read before are kept while a source is unreachable; say so, or it looks wiped.
+    const keptNote = kept > 0 ? ` ${count(kept, 'document')} from the last check ${kept === 1 ? 'is' : 'are'} kept.` : '';
+    return { text: `${status.readyDetail.trim() || fallback}${keptNote}`, tone: 'warning' };
   }
   const docs = count(status.counts.ok ?? 0, 'document');
   const checked = status.lastSyncedAt ? `last checked ${relativeTime(status.lastSyncedAt, now)}` : 'not checked yet';

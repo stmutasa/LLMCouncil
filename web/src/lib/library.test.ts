@@ -103,10 +103,11 @@ describe('sourceStatusLine', () => {
 
   it('shows why a source is not ready, in the warning tone', () => {
     expect(sourceStatusLine(sourceStatus({ ready: false, readyDetail: 'The folder does not exist.' }), NOW)).toEqual({
-      text: 'The folder does not exist.',
+      text: 'The folder does not exist. 1,204 documents from the last check are kept.',
       tone: 'warning',
     });
-    expect(sourceStatusLine(sourceStatus({ ready: false }), NOW).text).toBe('This folder cannot be read.');
+    const none = { ok: 0, empty: 0, unsupported: 0, stub: 0, 'too-large': 0, error: 0 };
+    expect(sourceStatusLine(sourceStatus({ ready: false, counts: none }), NOW).text).toBe('This folder cannot be read.');
   });
 });
 
