@@ -524,6 +524,8 @@ describe('static files', () => {
     expect(JSON.parse(api.text).error).toMatch(/no API endpoint/);
     srv.closeAllConnections();
     await new Promise<void>((r) => srv.close(() => r()));
-    await rm(webDir, { recursive: true, force: true });
+    // Let the app finish its own background writes before its data directory is removed.
+    await withDist.shutdown();
+    await rm(webDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
   });
 });
