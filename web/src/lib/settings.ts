@@ -216,6 +216,10 @@ export const errorKey = {
   defaultTimeout: 'defaultTimeoutSec',
   maxHistory: 'maxHistoryChars',
   providerTimeout: (id: string) => `provider.${id}.timeoutSec`,
+  excerptChars: 'library.excerptChars',
+  attachmentChars: 'library.attachmentChars',
+  autoSync: 'library.autoSyncMinutes',
+  plannerProvider: 'library.planner.provider',
 } as const;
 
 function isWholeNumber(n: number): boolean {
@@ -276,6 +280,24 @@ export function validateSettings(s: Settings, providerIds: ReadonlySet<string> |
   const h = s.maxHistoryChars;
   if (!isWholeNumber(h) || h < 0 || h > 1_000_000) errors[errorKey.maxHistory] = 'Enter a whole number from 0 to 1,000,000.';
 
+  const lib = s.library;
+  const chars = (n: number) => n.toLocaleString('en-US');
+  if (!isWholeNumber(lib.excerptChars) || lib.excerptChars < LIMITS.minExcerptChars || lib.excerptChars > LIMITS.maxExcerptChars) {
+    errors[errorKey.excerptChars] = `Enter a whole number of characters from ${chars(LIMITS.minExcerptChars)} to ${chars(LIMITS.maxExcerptChars)}.`;
+  }
+  if (
+    !isWholeNumber(lib.attachmentChars) ||
+    lib.attachmentChars < LIMITS.minAttachmentChars ||
+    lib.attachmentChars > LIMITS.maxAttachmentChars
+  ) {
+    errors[errorKey.attachmentChars] = `Enter a whole number of characters from ${chars(LIMITS.minAttachmentChars)} to ${chars(LIMITS.maxAttachmentChars)}.`;
+  }
+  const m = lib.autoSyncMinutes;
+  if (!isWholeNumber(m) || (m !== 0 && (m < 5 || m > 1440))) {
+    errors[errorKey.autoSync] = 'Enter 0 (only when asked) or 5–1,440 minutes.';
+  }
+  if (providerIds && !providerIds.has(lib.planner.provider)) errors[errorKey.plannerProvider] = 'Choose an available provider.';
+
   for (const [id, value] of Object.entries(s.providers)) {
     const pt = value.timeoutSec;
     if (pt === undefined) continue;
@@ -287,8 +309,9 @@ export function validateSettings(s: Settings, providerIds: ReadonlySet<string> |
 }
 
 /** The settings tab each error key belongs to, so the dialog can flag tabs with problems. */
-export function tabForErrorKey(key: string): 'council' | 'protocol' | 'arbiter' | 'providers' | 'general' {
+export function tabForErrorKey(key: string): 'council' | 'protocol' | 'arbiter' | 'library' | 'providers' | 'general' {
   if (key === 'members' || key.startsWith('member.')) return 'council';
+  if (key.startsWith('library.')) return 'library';
   if (key.startsWith('protocol.') || key.startsWith('round.') || key === 'councilRules') return 'protocol';
   if (key.startsWith('arbiter.')) return 'arbiter';
   if (key.startsWith('provider.')) return 'providers';

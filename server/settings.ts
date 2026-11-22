@@ -4,7 +4,10 @@ import { z } from 'zod';
 import type {
   ArbiterConfig,
   CustomProviderConfig,
+  FolderSource,
+  LibrarySettings,
   MemberConfig,
+  NotionSource,
   Protocol,
   ProviderSettings,
   RoundConfig,
@@ -20,6 +23,7 @@ import {
   defaultSettings,
 } from '../shared/defaults';
 import { mentionHandle } from '../shared/mentions';
+import { folderPathProblem, isWithin } from './library/sources/folder';
 import { readFileIfExists, withFileLock, writeFileAtomic } from './util/fileQueue';
 
 export const BUILTIN_PROVIDER_IDS = ['claude', 'codex', 'antigravity'] as const;
@@ -88,6 +92,31 @@ const arbiterSchema = z.object({
   analysis: z.boolean(),
 }) satisfies z.ZodType<ArbiterConfig>;
 
+const folderSourceSchema = z.object({
+  id: z.string(),
+  kind: z.literal('folder'),
+  name: z.string(),
+  enabled: z.boolean(),
+  path: z.string(),
+}) satisfies z.ZodType<FolderSource>;
+
+const notionSourceSchema = z.object({
+  id: z.string(),
+  kind: z.literal('notion'),
+  name: z.string(),
+  enabled: z.boolean(),
+}) satisfies z.ZodType<NotionSource>;
+
+const librarySchema = z.object({
+  sources: z.array(z.discriminatedUnion('kind', [folderSourceSchema, notionSourceSchema])),
+  mode: z.enum(['off', 'search', 'browse']),
+  excerptChars: z.number().int(),
+  attachmentChars: z.number().int(),
+  planner: z.object({ enabled: z.boolean(), provider: z.string(), model: z.string(), effort: z.string() }),
+  autoSyncMinutes: z.number().int(),
+  notionSaveParent: z.object({ id: z.string(), title: z.string() }).nullable(),
+}) satisfies z.ZodType<LibrarySettings>;
+
 export const settingsSchema = z.object({
   version: z.literal(1),
   members: z.array(memberSchema),
@@ -101,6 +130,7 @@ export const settingsSchema = z.object({
   stripApiKeys: z.boolean(),
   providers: z.record(z.string(), providerSettingsSchema),
   customProviders: z.array(customProviderSchema),
+  library: librarySchema,
 }) satisfies z.ZodType<Settings>;
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -156,6 +186,9 @@ export function fillDefaults(raw: unknown, mock: boolean): unknown {
     modelArgs: [],
     promptVia: 'stdin',
   }));
+  if (isPlainObject(merged.library)) {
+    merged.library.sources = fillEach(merged.library.sources, () => ({ enabled: true }));
+  }
   if (isPlainObject(merged.providers)) {
     for (const [id, p] of Object.entries(merged.providers)) {
       merged.providers[id] = isPlainObject(p) ? mergeOnto(DEFAULT_PROVIDER_SETTINGS, p) : p;
@@ -227,6 +260,83 @@ export interface SemanticOptions {
   mock: boolean;
   /** On load, unknown providers are tolerated so files written in mock mode still open. */
   allowUnknownProviders: boolean;
+  /**
+   * The app's data directory. When given (on save), folder sources are checked: full paths, not
+   * a drive's top, not the data directory or a folder around or inside it. On load they are
+   * not, so a file stays usable when the data directory moves; such a source is reported as not
+   * ready instead.
+   */
+  dataDir?: string;
+}
+
+export const SOURCE_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const MAX_SOURCE_NAME = 60;
+
+function checkLibrary(lib: LibrarySettings, opts: SemanticOptions, checkProvider: (provider: string, where: string) => void): void {
+  if (lib.sources.length > LIMITS.maxLibrarySources) {
+    throw new SettingsError(`The library can have at most ${LIMITS.maxLibrarySources} sources.`);
+  }
+  const ids = new Set<string>();
+  const names = new Map<string, string>();
+  const folders: { name: string; path: string }[] = [];
+  let notion = 0;
+  lib.sources.forEach((src, i) => {
+    const name = src.name.trim();
+    const where = name ? `Library source "${name}"` : `Library source ${i + 1}`;
+    if (!SOURCE_ID_RE.test(src.id)) {
+      throw new SettingsError(`${where}: the id "${src.id}" is not valid. Use 1–64 letters, digits, dashes or underscores.`);
+    }
+    if (ids.has(src.id)) throw new SettingsError(`Two library sources share the id "${src.id}".`);
+    ids.add(src.id);
+    if (!name) throw new SettingsError(`Library source ${i + 1} needs a name.`);
+    if (name.length > MAX_SOURCE_NAME) {
+      throw new SettingsError(`${where}: names can be at most ${MAX_SOURCE_NAME} characters.`);
+    }
+    const lower = name.toLowerCase();
+    if (names.has(lower)) throw new SettingsError(`Two library sources are named "${name}". Source names must be unique.`);
+    names.set(lower, name);
+    if (src.kind === 'notion') {
+      notion++;
+      if (notion > 1) throw new SettingsError('The library can have only one Notion source.');
+      return;
+    }
+    checkText(src.path, 4096, `${where}: the folder path`);
+    if (opts.dataDir === undefined) return;
+    const problem = folderPathProblem(src.path, opts.dataDir);
+    if (problem) throw new SettingsError(`${where}: ${problem}`);
+    for (const other of folders) {
+      if (isWithin(src.path, other.path) || isWithin(other.path, src.path)) {
+        throw new SettingsError(
+          `Library sources "${other.name}" and "${name}" overlap: one folder is the same as, or inside, the other. Each document should come from one source only.`,
+        );
+      }
+    }
+    folders.push({ name, path: src.path });
+  });
+
+  if (lib.excerptChars < LIMITS.minExcerptChars || lib.excerptChars > LIMITS.maxExcerptChars) {
+    throw new SettingsError(
+      `The passage budget must be between ${LIMITS.minExcerptChars.toLocaleString('en-US')} and ${LIMITS.maxExcerptChars.toLocaleString('en-US')} characters.`,
+    );
+  }
+  if (lib.attachmentChars < LIMITS.minAttachmentChars || lib.attachmentChars > LIMITS.maxAttachmentChars) {
+    throw new SettingsError(
+      `The attachment budget must be between ${LIMITS.minAttachmentChars.toLocaleString('en-US')} and ${LIMITS.maxAttachmentChars.toLocaleString('en-US')} characters.`,
+    );
+  }
+  checkProvider(lib.planner.provider, 'The search planner');
+  checkModel(lib.planner.model, 'The search planner');
+  checkEffort(lib.planner.effort, 'The search planner');
+  if (lib.autoSyncMinutes !== 0 && (lib.autoSyncMinutes < 5 || lib.autoSyncMinutes > 1440)) {
+    throw new SettingsError('Checking for changes must be every 5 to 1,440 minutes, or 0 to check only when asked.');
+  }
+  const parent = lib.notionSaveParent;
+  if (parent) {
+    if (parent.id.length < 1 || parent.id.length > 64) {
+      throw new SettingsError('The Notion page to save answers under has an invalid id.');
+    }
+    checkText(parent.title, 300, 'The title of the Notion page to save answers under');
+  }
 }
 
 /** Rules zod cannot express. Throws SettingsError with a message naming the offending field. */
@@ -356,6 +466,7 @@ export function checkSemantics(s: Settings, opts: SemanticOptions): void {
   if (s.maxHistoryChars < 0 || s.maxHistoryChars > 1_000_000) {
     throw new SettingsError('The history budget must be between 0 and 1,000,000 characters.');
   }
+  checkLibrary(s.library, opts, checkProvider);
   for (const [id, p] of Object.entries(s.providers)) {
     if (p.timeoutSec !== 0 && (p.timeoutSec < minTimeoutSec || p.timeoutSec > maxTimeoutSec)) {
       throw new SettingsError(
@@ -414,7 +525,7 @@ export class SettingsStore {
   }
 
   async save(input: unknown): Promise<Settings> {
-    const next = normalizeSettings(input, { mock: this.mock, allowUnknownProviders: false });
+    const next = normalizeSettings(input, { mock: this.mock, allowUnknownProviders: false, dataDir: this.dataDir });
     await withFileLock(this.file, () => writeFileAtomic(this.file, JSON.stringify(next, null, 2)));
     this.current = next;
     return this.get();

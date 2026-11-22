@@ -7,17 +7,20 @@ import './styles/composer.css';
 import './styles/markdown.css';
 import './styles/dialog.css';
 import './styles/settings.css';
+import './styles/library.css';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { boot, handlePopState, startListPolling } from './actions';
 import { App } from './App';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { startLibrarySync } from './librarySync';
 import { startStreamSync } from './streams';
 import { startTheme } from './theme';
 
 startTheme();
 startStreamSync();
 startListPolling();
+startLibrarySync();
 window.addEventListener('popstate', handlePopState);
 
 const rootElement = document.getElementById('root');

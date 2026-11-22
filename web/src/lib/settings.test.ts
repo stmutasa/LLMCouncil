@@ -35,6 +35,7 @@ function info(id: string, patch: Partial<ProviderInfo> = {}): ProviderInfo {
     effortLevels: [],
     webSearch: 'toggle',
     streams: true,
+    browse: 'no',
     modelSuggestions: [],
     canListModels: false,
     installHint: `install ${id}`,
@@ -47,6 +48,27 @@ function info(id: string, patch: Partial<ProviderInfo> = {}): ProviderInfo {
 const ALL = new Set(['claude', 'codex', 'antigravity', 'mock']);
 
 describe('validateSettings', () => {
+  it('checks the library budgets, check interval and planner provider', () => {
+    const s = defaultSettings();
+    s.library.excerptChars = LIMITS.minExcerptChars - 1;
+    s.library.attachmentChars = Number.NaN;
+    s.library.autoSyncMinutes = 3;
+    s.library.planner.provider = 'ghost';
+    const errors = validateSettings(s, ALL);
+    expect(errors[errorKey.excerptChars]).toContain('2,000 to 200,000');
+    expect(errors[errorKey.attachmentChars]).toContain('5,000 to 1,000,000');
+    expect(errors[errorKey.autoSync]).toBe('Enter 0 (only when asked) or 5–1,440 minutes.');
+    expect(errors[errorKey.plannerProvider]).toBe('Choose an available provider.');
+    expect(Object.keys(errors).map(tabForErrorKey)).toEqual(['library', 'library', 'library', 'library']);
+
+    const ok = defaultSettings();
+    ok.library.autoSyncMinutes = 0;
+    ok.library.excerptChars = LIMITS.maxExcerptChars;
+    expect(validateSettings(ok, ALL)).toEqual({});
+    ok.library.autoSyncMinutes = 1441;
+    expect(validateSettings(ok, ALL)[errorKey.autoSync]).toBeDefined();
+  });
+
   it('accepts the defaults', () => {
     expect(validateSettings(defaultSettings(), ALL)).toEqual({});
     expect(validateSettings(defaultSettings(true), ALL)).toEqual({});

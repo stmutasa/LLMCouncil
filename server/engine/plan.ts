@@ -11,6 +11,7 @@ import type {
   Settings,
   Turn,
 } from '../../shared/types';
+import type { StoredTurnLibrary } from './libraryPhase';
 import { resolveRole } from './prompts';
 
 /** A request that cannot become a turn; the HTTP layer answers 400 with the message. */
@@ -29,6 +30,8 @@ export interface TurnPlan {
   participants: MemberConfig[];
   /** Round configurations, parallel to turn.rounds. */
   rounds: RoundConfig[];
+  /** Library documents the user attached, in the order given. */
+  attachmentIds: string[];
 }
 
 const DIRECT_ROUND: RoundConfig = {
@@ -67,6 +70,41 @@ export function snapshotMember(m: MemberConfig, providerLabel: string): MemberSn
   };
 }
 
+/** SendTurnRequest.attachments: absent, or up to LIMITS.maxAttachments strings (duplicates dropped). */
+export function checkAttachments(value: unknown): string[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || !value.every((v) => typeof v === 'string')) {
+    throw new TurnPlanError('"attachments" must be a list of document ids.');
+  }
+  const ids = [...new Set((value as string[]).map((v) => v.trim()).filter(Boolean))];
+  if (ids.length > LIMITS.maxAttachments) {
+    throw new TurnPlanError(`At most ${LIMITS.maxAttachments} documents can be attached to one question.`);
+  }
+  if (ids.some((id) => id.length > 64)) throw new TurnPlanError('An attachment id is too long.');
+  return ids;
+}
+
+/**
+ * The turn's library record before the library phase runs: null when the library is not used
+ * (mode off, or no enabled source) and nothing is attached.
+ */
+export function plannedLibrary(settings: Settings, attachmentIds: string[]): StoredTurnLibrary | null {
+  const hasSources = settings.library.sources.some((s) => s.enabled);
+  const searching = settings.library.mode !== 'off' && hasSources;
+  if (!searching && attachmentIds.length === 0) return null;
+  return {
+    mode: settings.library.mode,
+    status: 'pending',
+    queries: [],
+    plannerNote: '',
+    excerpts: [],
+    attachments: [],
+    browsableDocuments: 0,
+    error: null,
+    attachmentIds: [...attachmentIds],
+  };
+}
+
 export function checkMessage(message: unknown): string {
   if (typeof message !== 'string' || message.trim() === '') {
     throw new TurnPlanError('Type a message to send to the council.');
@@ -88,8 +126,10 @@ export function planTurn(
   settings: Settings,
   providerLabel: (id: string) => string,
   now = new Date(),
+  attachmentIds: string[] = [],
 ): TurnPlan {
   checkMessage(message);
+  const attachments = checkAttachments(attachmentIds);
   const mentions = parseMentions(message, settings.members);
   const participants =
     mentions.memberIds.length > 0
@@ -146,9 +186,10 @@ export function planTurn(
     rounds: roundResults,
     arbiter,
     analysisText: '',
+    library: plannedLibrary(settings, attachments),
     finalText: '',
     finalSource: { kind: 'none', name: '', memberId: null },
     finishedAt: null,
   };
-  return { turn, question, participants, rounds };
+  return { turn, question, participants, rounds, attachmentIds: attachments };
 }

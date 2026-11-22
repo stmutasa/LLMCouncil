@@ -1,4 +1,14 @@
-import type { ArbiterResult, MemberResponse, MemberSnapshot, RoundResult, RoundType, Turn } from '../../../shared/types';
+import type {
+  ArbiterResult,
+  MemberResponse,
+  MemberSnapshot,
+  RoundResult,
+  RoundType,
+  SourceExcerpt,
+  Turn,
+  TurnAttachment,
+  TurnLibrary,
+} from '../../../shared/types';
 
 /** Test data builders shared by the unit tests. */
 
@@ -74,6 +84,7 @@ export function councilTurn(patch: Partial<Turn> = {}): Turn {
     rounds: [round(0, 'answer', ids), round(1, 'review', ids, { anonymize: true })],
     arbiter: arbiter(),
     analysisText: '',
+    library: null,
     finalText: '',
     finalSource: { kind: 'none', name: '', memberId: null },
     finishedAt: null,
@@ -88,6 +99,49 @@ export function directTurn(patch: Partial<Turn> = {}): Turn {
     members: [member('a', 'A')],
     rounds: [round(0, 'answer', ['a'])],
     arbiter: null,
+    ...patch,
+  };
+}
+
+export function excerpt(id: string, documentId: string, patch: Partial<SourceExcerpt> = {}): SourceExcerpt {
+  return {
+    id,
+    documentId,
+    title: `${documentId}.pdf`,
+    sourceName: 'Drive',
+    location: 'Contracts',
+    part: 'p. 1',
+    url: null,
+    text: `Text of ${id}`,
+    ...patch,
+  };
+}
+
+export function attachment(id: string, documentId: string, patch: Partial<TurnAttachment> = {}): TurnAttachment {
+  return {
+    id,
+    documentId,
+    title: `${documentId}.docx`,
+    sourceName: 'Drive',
+    location: '',
+    url: null,
+    chars: 1000,
+    truncated: false,
+    problem: '',
+    ...patch,
+  };
+}
+
+export function library(patch: Partial<TurnLibrary> = {}): TurnLibrary {
+  return {
+    mode: 'search',
+    status: 'done',
+    queries: [],
+    plannerNote: '',
+    excerpts: [],
+    attachments: [],
+    browsableDocuments: 0,
+    error: null,
     ...patch,
   };
 }

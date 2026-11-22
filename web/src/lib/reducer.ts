@@ -15,6 +15,13 @@ export function applyRunEvent(turn: Turn, event: RunEvent): Turn {
     case 'turn.end':
       return event.turn;
 
+    case 'library.start':
+      if (!turn.library || turn.library.status === 'running') return turn;
+      return { ...turn, library: { ...turn.library, status: 'running' } };
+
+    case 'library.end':
+      return { ...turn, library: event.library };
+
     case 'round.start':
       return updateRound(turn, event.round, (r) => (r.status === 'running' ? r : { ...r, status: 'running' }));
 

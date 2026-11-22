@@ -159,6 +159,29 @@ describe('SettingsStore', () => {
     expect((await new SettingsStore(dir, false).load()).members[0]!.provider).toBe('mock');
   });
 
+  it('loads a settings file written before the library existed', async () => {
+    const old = defaultSettings(false) as Partial<Settings>;
+    delete old.library;
+    await writeFile(path.join(dir, 'settings.json'), JSON.stringify(old));
+    const loaded = await new SettingsStore(dir, false).load();
+    expect(loaded.library).toEqual(defaultSettings(false).library);
+    expect((await readdir(dir)).some((f) => f.startsWith('settings.invalid-'))).toBe(false);
+  });
+
+  it('fills partial library settings and checks folder paths on save only', async () => {
+    const partial = { ...defaultSettings(false), library: { mode: 'browse', sources: [{ id: 's1', kind: 'folder', name: 'Docs', path: 'relative' }] } };
+    await writeFile(path.join(dir, 'settings.json'), JSON.stringify(partial));
+    const store = new SettingsStore(dir, false);
+    const loaded = await store.load();
+    expect(loaded.library.mode).toBe('browse');
+    expect(loaded.library.sources).toEqual([{ id: 's1', kind: 'folder', name: 'Docs', path: 'relative', enabled: true }]);
+    expect(loaded.library.excerptChars).toBe(24_000);
+    expect(loaded.library.planner).toEqual({ enabled: true, provider: 'claude', model: 'haiku', effort: '' });
+    await expect(store.save(loaded)).rejects.toThrow(/not a full path/);
+    loaded.library.sources[0] = { id: 's1', kind: 'folder', name: 'Docs', path: path.join(os.tmpdir(), 'somewhere-else'), enabled: true };
+    expect((await store.save(loaded)).library.sources).toHaveLength(1);
+  });
+
   it('rejects invalid saves without touching the file', async () => {
     const store = new SettingsStore(dir, false);
     await store.load();

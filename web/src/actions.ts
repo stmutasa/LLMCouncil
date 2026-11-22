@@ -1,5 +1,6 @@
 import type { Conversation, ConversationSummary, SendTurnResponse, Settings, Turn } from '../../shared/types';
 import { ApiError, api, errorMessage } from './api';
+import { attachmentsFromTurn, withLiveLibrary, type AttachedDocument } from './lib/library';
 import { parsePath, pathFor } from './lib/routes';
 import { writeStorage } from './lib/storage';
 import {
@@ -162,7 +163,15 @@ export async function loadConversation(id: string): Promise<void> {
   try {
     const conversation = await api.conversation(id);
     if (!current()) return;
-    setState({ open: { id, status: 'ready', conversation, error: null } });
+    setState((s) => ({
+      open: { id, status: 'ready', conversation, error: null },
+      // The composer starts from what the last question had attached; after that the list is
+      // the user's own, kept while they move between conversations.
+      attachments:
+        id in s.attachments
+          ? s.attachments
+          : { ...s.attachments, [id]: attachmentsFromTurn(conversation.turns.at(-1)?.library?.attachments ?? []) },
+    }));
   } catch (err) {
     if (!current()) return;
     const notFound = err instanceof ApiError && (err.status === 404 || err.status === 400);
@@ -214,16 +223,19 @@ function appendTurn(state: AppState, conversationId: string, turn: Turn, replace
   return { open: { ...open, conversation: { ...open.conversation, turns: [...others, turn] } } };
 }
 
-/** Posts a message from the composer identified by `key` ('' = new chat). */
+/** Posts a message from the composer identified by `key` ('' = new chat), with its attachments. */
 export async function sendMessage(key: ConversationKey, message: string): Promise<void> {
   const state = getState();
   if (state.pendingSend) return;
   clearComposerError(key);
-  setState((s) => ({ pendingSend: { key, message }, drafts: { ...s.drafts, [key]: '' } }));
+  const attached = state.attachments[key] ?? [];
+  setState((s) => ({ pendingSend: { key, message, attachments: attached }, drafts: { ...s.drafts, [key]: '' } }));
 
   let response: SendTurnResponse;
   try {
-    response = await api.sendTurn(key ? { conversationId: key, message } : { message });
+    const ids = attached.map((d) => d.id);
+    const body = key ? { conversationId: key, message } : { message };
+    response = await api.sendTurn(ids.length > 0 ? { ...body, attachments: ids } : body);
   } catch (err) {
     setState((s) => ({
       pendingSend: null,
@@ -235,11 +247,22 @@ export async function sendMessage(key: ConversationKey, message: string): Promis
   }
 
   const { conversation: summary, turn } = response;
-  setState((s) => ({ pendingSend: null, conversations: upsertSummary(s.conversations, summary) }));
+  setState((s) => ({
+    pendingSend: null,
+    conversations: upsertSummary(s.conversations, summary),
+    sentAttachments: attached.length > 0 ? { ...s.sentAttachments, [turn.id]: attached } : s.sentAttachments,
+  }));
   if (key) {
     setState((s) => appendTurn(s, key, turn));
     return;
   }
+  // The new chat's attachments now belong to the conversation it started; the next new chat
+  // begins with none.
+  setState((s) => {
+    const attachments = { ...s.attachments, [summary.id]: attached };
+    delete attachments[''];
+    return { attachments };
+  });
   // A new conversation: open it with the turn we already have, without another round trip.
   const conversation: Conversation = {
     id: summary.id,
@@ -252,6 +275,15 @@ export async function sendMessage(key: ConversationKey, message: string): Promis
     setState({ open: { id: summary.id, status: 'ready', conversation, error: null } });
     navigate({ kind: 'conversation', id: summary.id });
   }
+}
+
+/** Replaces the documents attached in one composer. */
+export function setAttachments(key: ConversationKey, docs: AttachedDocument[]): void {
+  setState((s) => ({ attachments: { ...s.attachments, [key]: docs } }));
+}
+
+export function removeAttachment(key: ConversationKey, documentId: string): void {
+  setState((s) => ({ attachments: { ...s.attachments, [key]: (s.attachments[key] ?? []).filter((d) => d.id !== documentId) } }));
 }
 
 function setTurnAction(turnId: string, action: 'stop' | 'skip' | 'regenerate' | null): void {
@@ -293,7 +325,16 @@ export async function regenerateTurn(conversationId: string, turnId: string): Pr
   setTurnAction(turnId, 'regenerate');
   try {
     const { conversation: summary, turn } = await api.regenerateTurn(conversationId, turnId);
-    setState((s) => ({ ...appendTurn(s, conversationId, turn, turnId), conversations: upsertSummary(s.conversations, summary) }));
+    setState((s) => {
+      // The server reuses the replaced turn's attachments; show them until it reports its own list.
+      const old = s.open?.conversation?.turns.find((t) => t.id === turnId);
+      const reused = attachmentsFromTurn(old?.library?.attachments ?? []);
+      return {
+        ...appendTurn(s, conversationId, turn, turnId),
+        conversations: upsertSummary(s.conversations, summary),
+        sentAttachments: reused.length > 0 ? { ...s.sentAttachments, [turn.id]: reused } : s.sentAttachments,
+      };
+    });
     return null;
   } catch (err) {
     return `Could not regenerate: ${errorMessage(err)}`;
@@ -324,7 +365,9 @@ export async function deleteConversation(id: string): Promise<void> {
   setState((s) => {
     const drafts = { ...s.drafts };
     delete drafts[id];
-    return { conversations: s.conversations.filter((c) => c.id !== id), drafts };
+    const attachments = { ...s.attachments };
+    delete attachments[id];
+    return { conversations: s.conversations.filter((c) => c.id !== id), drafts, attachments };
   });
   if (getState().route.kind === 'conversation' && conversationKey(getState().route) === id) {
     navigate({ kind: 'home' }, { replace: true });
@@ -371,12 +414,18 @@ export function changeSettings(mutate: (current: Settings) => Settings, label: s
   });
 }
 
-/** Saves the settings dialog's draft. Resolves with the saved settings; rejects with the server's error. */
+/**
+ * Saves the settings dialog's draft. Resolves with the saved settings; rejects with the server's
+ * error. Library sources, the Notion save location and the library mode are saved as they change
+ * (see saveLibraryChange), so the draft is sent with their current values, never the copies it
+ * was opened with.
+ */
 export function saveSettingsDraft(draft: Settings): Promise<Settings> {
   return new Promise<Settings>((resolve, reject) => {
     settingsChain = settingsChain.then(async () => {
       try {
-        const saved = await api.saveSettings(draft);
+        const live = getState().settings;
+        const saved = await api.saveSettings(live ? withLiveLibrary(draft, live) : draft);
         const before = confirmedSettings;
         confirmedSettings = saved;
         localVersion += 1;
@@ -390,6 +439,56 @@ export function saveSettingsDraft(draft: Settings): Promise<Settings> {
         if (providersChanged) void loadProviders(true);
       } catch (err) {
         reject(err instanceof Error ? err : new Error(errorMessage(err)));
+      }
+    });
+  });
+}
+
+/**
+ * Saves a library change (a source added, removed, renamed or switched, or the Notion save
+ * location) at once, without waiting for the settings dialog's Save. It runs on the same chain
+ * as every other settings write, applied to the latest settings when its turn comes, so it
+ * neither loses nor is lost to concurrent changes. Nothing is applied before the server accepts
+ * it; rejects with the server's message (shown verbatim by the caller).
+ */
+export function saveLibraryChange(mutate: (current: Settings) => Settings): Promise<Settings> {
+  return new Promise<Settings>((resolve, reject) => {
+    settingsChain = settingsChain.then(async () => {
+      const current = getState().settings;
+      if (!current) {
+        reject(new Error('The settings have not loaded yet.'));
+        return;
+      }
+      const version = localVersion;
+      try {
+        const saved = await api.saveSettings(mutate(current));
+        confirmedSettings = saved;
+        // A composer change made while the request was in flight is still waiting to be saved;
+        // keep it and take only the library fields from the server's answer.
+        setState((s) => ({ settings: s.settings && localVersion !== version ? withLiveLibrary(s.settings, saved) : saved }));
+        resolve(saved);
+      } catch (err) {
+        reject(err instanceof Error ? err : new Error(errorMessage(err)));
+      }
+    });
+  });
+}
+
+/**
+ * Re-reads the settings after the server changed them itself (connecting Notion adds a Notion
+ * source). Only the library fields are taken over, so unsaved local changes stay.
+ */
+export function reloadLibrarySettings(): Promise<void> {
+  return new Promise<void>((resolve) => {
+    settingsChain = settingsChain.then(async () => {
+      try {
+        const fetched = await api.settings();
+        confirmedSettings = confirmedSettings ? withLiveLibrary(confirmedSettings, fetched) : fetched;
+        setState((s) => ({ settings: s.settings ? withLiveLibrary(s.settings, fetched) : fetched }));
+      } catch (err) {
+        showToast(`Could not reload the library settings: ${errorMessage(err)}`);
+      } finally {
+        resolve();
       }
     });
   });
@@ -420,4 +519,12 @@ export function toggleSidebarCollapsed(): void {
 
 export function setMobileSidebarOpen(open: boolean): void {
   setState({ mobileSidebarOpen: open });
+}
+
+let citationSeq = 0;
+
+/** Opens the Sources block of `turnId` and brings the cited passage or document into view. */
+export function focusCitation(turnId: string, id: string): void {
+  citationSeq += 1;
+  setState({ citationTarget: { turnId, id, seq: citationSeq } });
 }

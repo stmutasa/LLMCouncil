@@ -14,6 +14,11 @@ export interface RunRequest {
   onText(text: string, replace: boolean): void;
   /** A transient progress label; '' clears it. */
   onActivity(label: string): void;
+  /**
+   * Browse mode: the library mirror, used as the CLI's working directory so it can open the
+   * documents. Only given to providers whose `browse` capability is not 'no'.
+   */
+  browseDir?: string;
 }
 
 export interface RunOutcome {

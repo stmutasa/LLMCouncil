@@ -15,6 +15,7 @@ export interface CliDescriptor {
   effortLevels: string[];
   webSearch: ProviderInfo['webSearch'];
   streams: boolean;
+  browse: ProviderInfo['browse'];
   modelSuggestions: string[];
   canListModels: boolean;
   installHint: string;
@@ -57,6 +58,7 @@ export async function runCli(
     cliName: desc.cliName,
     installHint: desc.installHint,
     onLine: (line) => parser.push(line),
+    cwd: req.browseDir,
   });
   try {
     const out = parser.finish(res);
@@ -125,6 +127,7 @@ export function baseInfo(desc: CliDescriptor, cfg: CliConfig): ProviderInfo {
     effortLevels: [...desc.effortLevels],
     webSearch: desc.webSearch,
     streams: desc.streams,
+    browse: desc.browse,
     modelSuggestions: [...desc.modelSuggestions],
     canListModels: desc.canListModels,
     installHint: desc.installHint,

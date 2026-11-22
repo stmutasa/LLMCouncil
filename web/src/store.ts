@@ -2,16 +2,19 @@ import { create } from 'zustand';
 import type {
   Conversation,
   ConversationSummary,
+  LibraryStatus,
   MetaResponse,
+  NotionStatus,
   ProviderInfo,
   Settings,
   Turn,
 } from '../../shared/types';
+import type { AttachedDocument } from './lib/library';
 import { readStorage } from './lib/storage';
 
 export type Route = { kind: 'home' } | { kind: 'conversation'; id: string };
 
-export type SettingsTab = 'council' | 'protocol' | 'arbiter' | 'providers' | 'general';
+export type SettingsTab = 'council' | 'protocol' | 'arbiter' | 'library' | 'providers' | 'general';
 
 export type ThemePreference = 'system' | 'light' | 'dark';
 
@@ -43,7 +46,7 @@ export interface AppState {
   open: OpenConversation | null;
   streams: Record<string, StreamState>;
   /** A message being posted; shown optimistically in the thread until the server answers. */
-  pendingSend: { key: ConversationKey; message: string } | null;
+  pendingSend: { key: ConversationKey; message: string; attachments: AttachedDocument[] } | null;
   composerErrors: Record<ConversationKey, string>;
   drafts: Record<ConversationKey, string>;
   /** Turn ids with a stop/skip/regenerate request in flight. */
@@ -53,6 +56,15 @@ export interface AppState {
   mobileSidebarOpen: boolean;
   toasts: Toast[];
   theme: ThemePreference;
+  /** GET /api/library, polled while a source is syncing. `error` is the last failed check. */
+  library: { status: LibraryStatus | null; error: string | null };
+  notion: { status: NotionStatus | null; loading: boolean; error: string | null };
+  /** Documents attached in each composer; they stay attached for later questions. */
+  attachments: Record<ConversationKey, AttachedDocument[]>;
+  /** What was attached to a turn when it was sent, shown until the server reports its own list. */
+  sentAttachments: Record<string, AttachedDocument[]>;
+  /** A citation chip was activated: the turn's Sources block opens and shows the item. */
+  citationTarget: { turnId: string; id: string; seq: number } | null;
 }
 
 export const STORAGE_KEYS = {
@@ -83,6 +95,11 @@ export const useStore = create<AppState>()(() => ({
   mobileSidebarOpen: false,
   toasts: [],
   theme: initialTheme(),
+  library: { status: null, error: null },
+  notion: { status: null, loading: false, error: null },
+  attachments: {},
+  sentAttachments: {},
+  citationTarget: null,
 }));
 
 export const getState = useStore.getState;

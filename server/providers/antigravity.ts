@@ -31,6 +31,7 @@ export const ANTIGRAVITY: CliDescriptor = {
   effortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
   webSearch: 'builtin',
   streams: true,
+  browse: 'untested',
   modelSuggestions: [
     'gemini-4-neon-xhigh',
     'gemini-4-neon-high',

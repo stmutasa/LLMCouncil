@@ -1,13 +1,23 @@
 import type {
   Conversation,
   ConversationSummary,
+  DirectoryListing,
+  DocumentStatus,
+  LibraryDocumentText,
+  LibraryDocumentsResponse,
+  LibraryStatus,
   MetaResponse,
+  NotionPageRef,
+  NotionStatus,
   ProviderInfo,
   ProviderModelsResult,
   ProviderTestResult,
+  SaveToNotionRequest,
+  SaveToNotionResponse,
   SendTurnRequest,
   SendTurnResponse,
   Settings,
+  SourceExcerpt,
 } from '../../shared/types';
 
 /** An HTTP or network failure with a message fit to show the user. `status` is 0 for network errors. */
@@ -83,7 +93,41 @@ export const api = {
   skipTurn: (cid: string, tid: string) => request<void>('POST', `/conversations/${enc(cid)}/turns/${enc(tid)}/skip`),
   regenerateTurn: (cid: string, tid: string) =>
     request<SendTurnResponse>('POST', `/conversations/${enc(cid)}/turns/${enc(tid)}/regenerate`),
+
+  library: () => request<LibraryStatus>('GET', '/library'),
+  syncSource: (id: string) => request<void>('POST', `/library/sources/${enc(id)}/sync`),
+  cancelSync: (id: string) => request<void>('POST', `/library/sources/${enc(id)}/cancel`),
+  documents: (query: DocumentQuery) => request<LibraryDocumentsResponse>('GET', `/library/documents${queryString(query)}`),
+  documentText: (id: string) => request<LibraryDocumentText>('GET', `/library/documents/${enc(id)}/text`),
+  revealDocument: (id: string) => request<void>('POST', `/library/documents/${enc(id)}/reveal`),
+  searchLibrary: (query: string) => request<{ excerpts: SourceExcerpt[] }>('POST', '/library/search', { query }),
+  directories: (path?: string) => request<DirectoryListing>('GET', `/fs/dirs${path ? `?path=${enc(path)}` : ''}`),
+  notionStatus: () => request<NotionStatus>('GET', '/library/notion'),
+  connectNotion: (token: string) => request<NotionStatus>('PUT', '/library/notion/token', { token }),
+  disconnectNotion: () => request<void>('DELETE', '/library/notion/token'),
+  notionPages: (q: string) => request<{ pages: NotionPageRef[] }>('GET', `/library/notion/pages?q=${enc(q)}`),
+  saveToNotion: (cid: string, tid: string, body: SaveToNotionRequest) =>
+    request<SaveToNotionResponse>('POST', `/conversations/${enc(cid)}/turns/${enc(tid)}/notion`, body),
 };
+
+export interface DocumentQuery {
+  sourceId?: string;
+  status?: DocumentStatus[];
+  q?: string;
+  offset?: number;
+  limit?: number;
+}
+
+function queryString(query: DocumentQuery): string {
+  const params = new URLSearchParams();
+  if (query.sourceId) params.set('sourceId', query.sourceId);
+  if (query.status && query.status.length > 0) params.set('status', query.status.join(','));
+  if (query.q && query.q.trim()) params.set('q', query.q.trim());
+  if (query.offset) params.set('offset', String(query.offset));
+  if (query.limit) params.set('limit', String(query.limit));
+  const text = params.toString();
+  return text ? `?${text}` : '';
+}
 
 export function eventsUrl(cid: string, tid: string): string {
   return `/api/conversations/${enc(cid)}/turns/${enc(tid)}/events`;

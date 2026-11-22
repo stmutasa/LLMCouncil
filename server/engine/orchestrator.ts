@@ -15,6 +15,7 @@ import type {
 } from '../../shared/types';
 import { withoutFinalPeriod } from '../util/text';
 import { isAbortError, type Provider } from '../providers/types';
+import { runLibraryPhase, type LibraryAccess, type TurnLibraryMaterial } from './libraryPhase';
 import type { TurnPlan } from './plan';
 import {
   buildAnswerPrompt,
@@ -37,6 +38,10 @@ export interface ProviderSource {
   timeoutMs(id: string, settings: Settings): number;
   /** Billing mode from the last provider detection, for CLIs that do not report it per call. */
   billingHint?(id: string): ProviderInfo['billing'];
+  /** Whether the provider can open library files itself; absent means 'no'. */
+  browseSupport?(id: string, settings: Settings): ProviderInfo['browse'];
+  /** Short label for messages ("Claude"); falls back to the id. */
+  label?(id: string, settings: Settings): string;
 }
 
 /** Passed as the abort reason when the server shuts down, so the turn ends as 'interrupted'. */
@@ -49,11 +54,17 @@ export class ShutdownReason extends Error {
 
 /** Lets the HTTP layer ask a running turn to skip to the verdict. */
 export class RunControl {
-  phase: 'rounds' | 'arbiter' | 'finished' = 'rounds';
+  /** 'library': the library is being searched; skipping to the verdict does not apply yet. */
+  phase: 'library' | 'rounds' | 'arbiter' | 'finished';
   skipRequested = false;
   private roundController: AbortController | null = null;
 
-  constructor(readonly mode: Turn['mode']) {}
+  constructor(
+    readonly mode: Turn['mode'],
+    usesLibrary = false,
+  ) {
+    this.phase = usesLibrary ? 'library' : 'rounds';
+  }
 
   canSkip(): boolean {
     return this.mode === 'council' && this.phase === 'rounds' && !this.skipRequested;
@@ -85,6 +96,8 @@ export interface OrchestratorInput {
   /** Aborted by "stop" (or shutdown, with a ShutdownReason). */
   signal: AbortSignal;
   control: RunControl;
+  /** The document library; null when the server has none (the library phase then reports it). */
+  library?: LibraryAccess | null;
 }
 
 interface AnswerSet {
@@ -111,7 +124,9 @@ export function historyTurns(conversation: Conversation, currentTurnId: string):
   for (const t of conversation.turns) {
     if (t.id === currentTurnId) break;
     if (t.status === 'running' || !t.finalText.trim()) continue;
-    out.push({ question: parseMentions(t.userMessage, t.members).cleaned, answer: t.finalText });
+    const lib = t.library;
+    const citesLibrary = !!lib && (lib.excerpts.length > 0 || lib.attachments.some((a) => !a.problem));
+    out.push({ question: parseMentions(t.userMessage, t.members).cleaned, answer: t.finalText, citesLibrary });
   }
   return out;
 }
@@ -125,6 +140,7 @@ class TurnRunner {
   private answerSet: AnswerSet | null = null;
   private nextSetId = 1;
   private latestLeaderboard: { entries: LeaderboardEntry[]; setId: number } | null = null;
+  private material: TurnLibraryMaterial | null = null;
 
   constructor(private readonly input: OrchestratorInput) {
     this.turn = input.plan.turn;
@@ -162,7 +178,16 @@ class TurnRunner {
       councilRules: this.input.settings.councilRules,
       history: this.history,
       question: this.input.plan.question,
+      library: this.material,
+      browse: this.browses(m.provider),
     };
+  }
+
+  /** Whether this provider's calls run in the browse mirror (browse mode, a capable CLI). */
+  private browses(providerId: string): boolean {
+    if (!this.material?.browseDir) return false;
+    const support = this.input.providers.browseSupport?.(providerId, this.input.settings) ?? 'no';
+    return support !== 'no';
   }
 
   private roundInfo(index: number): RoundPromptInfo {
@@ -202,6 +227,7 @@ class TurnRunner {
         webSearch: this.webOn(providerId),
         timeoutMs: this.input.providers.timeoutMs(providerId, this.input.settings),
         signal,
+        browseDir: this.browses(providerId) ? this.material!.browseDir! : undefined,
         onText: (text, replace) => {
           if (!open) return;
           target.text = replace ? text : target.text + text;
@@ -474,6 +500,8 @@ class TurnRunner {
           }
         : null,
       missing: this.missingMembers(),
+      library: this.material,
+      browse: this.browses(arbiter.provider),
     });
 
     arbiter.status = 'running';
@@ -555,6 +583,25 @@ class TurnRunner {
   }
 
   private async execute(): Promise<void> {
+    if (this.turn.library) {
+      try {
+        this.material = await runLibraryPhase({
+          conversation: this.input.conversation,
+          turn: this.turn,
+          settings: this.input.settings,
+          library: this.input.library ?? null,
+          providers: this.input.providers,
+          question: this.input.plan.question,
+          attachmentIds: this.input.plan.attachmentIds,
+          signal: this.internal.signal,
+          emit: (event) => this.emit(event),
+        });
+      } catch (err) {
+        if (this.stopped) return this.endStopped();
+        throw err;
+      }
+    }
+    this.input.control.phase = 'rounds';
     const outcome = await this.runRounds();
     if (outcome === 'stopped') return this.endStopped();
 

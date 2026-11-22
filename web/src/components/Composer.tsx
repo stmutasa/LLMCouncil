@@ -1,20 +1,23 @@
-import { ArrowUp, FastForward, Globe, Layers, Scale, Square } from 'lucide-react';
-import { useEffect, useId, useLayoutEffect, useRef, type KeyboardEvent } from 'react';
-import type { ProviderInfo, Settings, Turn } from '../../../shared/types';
+import { ArrowUp, FastForward, FileText, Globe, Layers, Library, Paperclip, Scale, Square, X } from 'lucide-react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
+import type { LibraryMode, ProviderInfo, Settings, Turn } from '../../../shared/types';
 import {
   changeSettings,
   clearComposerError,
   openSettings,
+  removeAttachment,
   sendMessage,
   setDraft,
   skipToVerdict,
   stopTurn,
 } from '../actions';
 import { formatNumber, plural } from '../lib/format';
+import { anySyncActive, attachmentBudget, browseNote, browseSupport, formatChars, type AttachedDocument } from '../lib/library';
 import { activeProtocol, arbiterFromMember, arbiterMatchesMember, enabledMembers } from '../lib/settings';
 import { canSkipToVerdict } from '../lib/turn';
 import { useStore, type ConversationKey } from '../store';
-import { MemberDot, Spinner } from './icons';
+import { MemberDot, Spinner, WarningIcon } from './icons';
+import { AttachmentPicker } from './library/AttachmentPicker';
 import { Menu, MenuGroup, MenuItem, MenuSeparator } from './Menu';
 
 interface ComposerProps {
@@ -36,6 +39,8 @@ export function Composer({ convKey, runningTurn, ready, autoFocus = false }: Com
   const settings = useStore((s) => s.settings);
   const maxChars = useStore((s) => s.meta?.limits.maxMessageChars ?? 200_000);
   const turnAction = useStore((s) => (runningTurn ? s.turnActions[runningTurn.id] ?? null : null));
+  const attachments = useStore((s) => s.attachments[convKey] ?? NO_ATTACHMENTS);
+  const [picking, setPicking] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const errorId = useId();
   const counterId = useId();
@@ -90,6 +95,9 @@ export function Composer({ convKey, runningTurn, ready, autoFocus = false }: Com
           submit();
         }}
       >
+        {attachments.length > 0 && settings && (
+          <AttachmentChips convKey={convKey} attachments={attachments} budget={settings.library.attachmentChars} />
+        )}
         <label className="visually-hidden" htmlFor={`composer-${convKey || 'new'}`}>
           Message the council
         </label>
@@ -112,9 +120,23 @@ export function Composer({ convKey, runningTurn, ready, autoFocus = false }: Com
         )}
         <div className="composer-bar">
           <div className="composer-controls">
+            {settings && (settings.library.sources.length > 0 || attachments.length > 0) && (
+              <button
+                type="button"
+                className={`chip-button icon-only${attachments.length > 0 ? ' on' : ''}`}
+                onClick={() => setPicking(true)}
+                disabled={!ready}
+                aria-haspopup="dialog"
+                aria-label={attachments.length > 0 ? `Attach documents (${attachments.length} attached)` : 'Attach documents'}
+                title="Attach documents for every model to read in full"
+              >
+                <Paperclip size={15} aria-hidden="true" />
+              </button>
+            )}
             {settings && <ProtocolMenu settings={settings} />}
             {settings && <ArbiterMenu settings={settings} />}
             {settings && <WebSearchToggle settings={settings} />}
+            {settings && <LibraryMenu settings={settings} />}
           </div>
           <div className="composer-send">
             {runningTurn && skippable && (
@@ -150,7 +172,124 @@ export function Composer({ convKey, runningTurn, ready, autoFocus = false }: Com
         </div>
       </form>
       <p className="composer-hint">{HINT}</p>
+      {picking && <AttachmentPicker convKey={convKey} onClose={() => setPicking(false)} />}
     </div>
+  );
+}
+
+const NO_ATTACHMENTS: AttachedDocument[] = [];
+
+function AttachmentChips({ convKey, attachments, budget }: { convKey: string; attachments: AttachedDocument[]; budget: number }) {
+  const plan = attachmentBudget(attachments, budget);
+  const byId = new Map(plan.items.map((i) => [i.id, i]));
+  return (
+    <div className="composer-attachments">
+      <ul className="attachment-chips" aria-label="Attached documents">
+        {attachments.map((d) => {
+          const item = byId.get(d.id);
+          const note = d.problem ? d.problem : item?.leftOut ? 'Over the attachment budget: it will not be included.' : item?.cut ? 'Over the attachment budget: it will be cut.' : '';
+          return (
+            <li key={d.id} className={`attachment-chip${note ? ' over' : ''}`} title={note ? `${d.title}\n${note}` : d.title}>
+              {note ? <WarningIcon size={13} /> : <FileText size={13} aria-hidden="true" />}
+              <span className="attachment-chip-title">{d.title}</span>
+              <span className="attachment-chip-size">{formatChars(d.chars)}</span>
+              {note && <span className="visually-hidden">{note}</span>}
+              <button
+                type="button"
+                className="attachment-chip-remove"
+                onClick={() => removeAttachment(convKey, d.id)}
+                aria-label={`Remove ${d.title}`}
+                title="Remove"
+              >
+                <X size={13} aria-hidden="true" />
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      {plan.over > 0 && (
+        <p className="composer-attachments-note">
+          Over the attachment budget by {formatNumber(plan.over)} characters: the documents marked will be cut or left out.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function LibraryMenu({ settings }: { settings: Settings }) {
+  const status = useStore((s) => s.library.status);
+  const providers = useStore((s) => s.providers.list);
+  const mode = settings.library.mode;
+  const hasSources = settings.library.sources.length > 0;
+  // Unknown (not loaded yet, or the check failed) counts as usable: never hide the mode choice
+  // because of a failed status request.
+  const documents = status ? status.documents : null;
+  const empty = !hasSources || documents === 0;
+  const reading = documents === 0 && anySyncActive(status);
+
+  const label = !hasSources ? 'Library' : reading ? 'Library: reading…' : documents === 0 ? 'Library: empty' : `Library: ${mode}`;
+  const active = !empty && mode !== 'off';
+  const note = providers ? browseNote(browseSupport(settings, providers)) : '';
+  const setMode = (next: LibraryMode) => {
+    if (next === mode) return;
+    changeSettings((s) => ({ ...s, library: { ...s.library, mode: next } }), 'the library setting');
+  };
+
+  return (
+    <Menu
+      trigger={
+        <>
+          <Library size={15} aria-hidden="true" />
+          <span className="chip-label">{label}</span>
+        </>
+      }
+      triggerLabel={label}
+      triggerClassName={`chip-button${active ? ' on' : ''}`}
+      triggerTitle="How questions use your document library"
+      placement="top-start"
+      menuLabel="Library"
+      className="menu-wide"
+    >
+      {empty ? (
+        <MenuItem
+          description={
+            !hasSources
+              ? 'Add folders or a Notion workspace so the council can use your own documents.'
+              : reading
+                ? 'Your documents are being read. They can be searched as soon as some are ready.'
+                : 'None of the documents in your sources could be read yet.'
+          }
+          onSelect={() => openSettings('library')}
+        >
+          Add documents…
+        </MenuItem>
+      ) : (
+        <>
+          <MenuGroup label="Library">
+            <MenuItem checked={mode === 'off'} description="Questions do not use the library. Attached documents are still read." onSelect={() => setMode('off')}>
+              Off
+            </MenuItem>
+            <MenuItem checked={mode === 'search'} description="Every model gets the same relevant passages." onSelect={() => setMode('search')}>
+              Search the library
+            </MenuItem>
+            <MenuItem
+              checked={mode === 'browse'}
+              description={
+                <>
+                  Models with file tools also open documents themselves. Slower.
+                  {note && <span className="menu-item-note">{note}</span>}
+                </>
+              }
+              onSelect={() => setMode('browse')}
+            >
+              Let models browse
+            </MenuItem>
+          </MenuGroup>
+          <MenuSeparator />
+          <MenuItem onSelect={() => openSettings('library')}>Manage library…</MenuItem>
+        </>
+      )}
+    </Menu>
   );
 }
 

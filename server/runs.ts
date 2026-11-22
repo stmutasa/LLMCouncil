@@ -1,5 +1,6 @@
 import type { Conversation, RunEvent, Settings, Turn } from '../shared/types';
 import { RunControl, runTurn, ShutdownReason, type ProviderSource } from './engine/orchestrator';
+import type { LibraryAccess } from './engine/libraryPhase';
 import type { TurnPlan } from './engine/plan';
 import type { Storage } from './storage';
 
@@ -15,6 +16,7 @@ export interface RunManagerOptions {
   rng?: () => number;
   /** Delta coalescing window (tests may shorten it). */
   coalesceMs?: number;
+  library?: LibraryAccess | null;
 }
 
 /** In-memory state of one running turn. Runs continue when every browser disconnects. */
@@ -35,7 +37,7 @@ export class Run {
     readonly plan: TurnPlan,
     private readonly settings: Settings,
   ) {
-    this.control = new RunControl(plan.turn.mode);
+    this.control = new RunControl(plan.turn.mode, plan.turn.library !== null);
     this.finished = new Promise((resolve) => (this.resolveFinished = resolve));
   }
 
@@ -69,6 +71,7 @@ export class Run {
       emit: (event) => this.handle(event),
       signal: this.abort.signal,
       control: this.control,
+      library: this.manager.options.library ?? null,
     }).catch((err: unknown) => {
       // runTurn is written never to reject; if it does, release the conversation regardless.
       console.error('[runs] A turn ended abnormally:', err);
@@ -125,7 +128,12 @@ export class Run {
       return;
     }
     this.broadcast(event);
-    if (event.type === 'member.end' || event.type === 'round.end' || event.type === 'arbiter.end') {
+    if (
+      event.type === 'library.end' ||
+      event.type === 'member.end' ||
+      event.type === 'round.end' ||
+      event.type === 'arbiter.end'
+    ) {
       void this.manager.persistTurn(this.conversationId, structuredClone(this.turn), false);
     }
   }

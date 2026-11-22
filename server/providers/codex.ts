@@ -28,6 +28,7 @@ export const CODEX: CliDescriptor = {
   effortLevels: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
   webSearch: 'toggle',
   streams: false,
+  browse: 'untested',
   modelSuggestions: [
     'gpt-6.2-astra',
     'gpt-6.2-sol',
@@ -70,14 +71,14 @@ export function codexArgs(req: Pick<RunRequest, 'model' | 'effort' | 'webSearch'
   return [...args, ...extraArgs, '-'];
 }
 
-function itemActivity(type: string | null): string | null {
+function itemActivity(type: string | null, browse: boolean): string | null {
   switch (type) {
     case 'reasoning':
       return 'Reasoning…';
     case 'web_search':
       return 'Searching the web…';
     case 'command_execution':
-      return 'Running a command…';
+      return browse ? 'Reading the library…' : 'Running a command…';
     case 'error':
     case null:
       return null;
@@ -86,7 +87,10 @@ function itemActivity(type: string | null): string | null {
   }
 }
 
-export function createCodexParser(handlers: Pick<RunRequest, 'onText' | 'onActivity'>): StreamParser {
+export function createCodexParser(
+  handlers: Pick<RunRequest, 'onText' | 'onActivity'>,
+  opts: { browse?: boolean } = {},
+): StreamParser {
   let message: string | null = null;
   let lastError: string | null = null;
   let terminal: { ok: true } | { ok: false; error: string } | null = null;
@@ -115,7 +119,7 @@ export function createCodexParser(handlers: Pick<RunRequest, 'onText' | 'onActiv
             lastError = str(item.message) ?? lastError;
             return;
           }
-          const activity = itemActivity(type);
+          const activity = itemActivity(type, !!opts.browse);
           if (activity !== null) handlers.onActivity(ev.type === 'item.completed' ? '' : activity);
           return;
         }
@@ -223,7 +227,9 @@ export function codexProvider(cfg: CliConfig): Provider {
       return { ...info, installed: true, version: v.version, ...auth, warnings };
     },
     run(req) {
-      return runCli(CODEX, cfg, req, codexArgs(req, cfg.extraArgs), req.prompt, createCodexParser(req));
+      // In browse mode only the working directory changes; the read-only sandbox stays.
+      const parser = createCodexParser(req, { browse: !!req.browseDir });
+      return runCli(CODEX, cfg, req, codexArgs(req, cfg.extraArgs), req.prompt, parser);
     },
     async listModels(signal) {
       const res = await runCommand(commandFor(CODEX, cfg), ['debug', 'models'], {

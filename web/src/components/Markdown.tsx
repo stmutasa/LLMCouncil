@@ -4,10 +4,12 @@ import rehypeHighlight from 'rehype-highlight';
 import rehypeKatex from 'rehype-katex';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
+import { CITATION_ELEMENT, remarkCitations } from '../lib/citations';
 import { normalizeMathDelimiters } from '../lib/math';
+import { CitationGroup } from './Citation';
 import { CopyButton } from './CopyButton';
 
-const remarkPlugins: Options['remarkPlugins'] = [remarkGfm, [remarkMath, { singleDollarTextMath: false }]];
+const remarkPlugins: Options['remarkPlugins'] = [remarkGfm, [remarkMath, { singleDollarTextMath: false }], remarkCitations];
 const rehypePlugins: Options['rehypePlugins'] = [
   [rehypeKatex, { throwOnError: false, strict: 'ignore' }],
   [rehypeHighlight, { detect: false }],
@@ -79,6 +81,7 @@ const components: Components = {
   table: TableWrap,
   a: Link,
   img: Image,
+  [CITATION_ELEMENT]: CitationGroup,
 };
 
 interface MarkdownProps {

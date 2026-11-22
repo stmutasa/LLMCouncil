@@ -28,6 +28,7 @@ export const CLAUDE: CliDescriptor = {
   effortLevels: ['low', 'medium', 'high', 'xhigh', 'max'],
   webSearch: 'toggle',
   streams: true,
+  browse: 'yes',
   modelSuggestions: ['fable', 'opus', 'sonnet', 'haiku'],
   canListModels: false,
   installHint: 'Install Claude Code: https://code.claude.com/docs/en/setup',
@@ -38,8 +39,15 @@ export const CLAUDE: CliDescriptor = {
 export const CLAUDE_SYSTEM_PROMPT =
   'You are an expert advisor taking part in a structured deliberation. Follow the instructions in the user message exactly and reply in Markdown.';
 
-/** Never add --bare: it turns off the subscription login. */
-export function claudeArgs(req: Pick<RunRequest, 'model' | 'effort' | 'webSearch'>, extraArgs: string[]): string[] {
+/**
+ * Never add --bare: it turns off the subscription login. In browse mode the read-only file tools
+ * are enabled without --allowedTools: reads inside the working directory (the mirror) need no
+ * permission, and reads outside it are refused (verified live).
+ */
+export function claudeArgs(
+  req: Pick<RunRequest, 'model' | 'effort' | 'webSearch' | 'browseDir'>,
+  extraArgs: string[],
+): string[] {
   const args = [
     '-p',
     '--output-format',
@@ -54,8 +62,12 @@ export function claudeArgs(req: Pick<RunRequest, 'model' | 'effort' | 'webSearch
     '--setting-sources',
     '',
   ];
-  if (req.webSearch) args.push('--tools', 'WebSearch,WebFetch', '--allowedTools', 'WebSearch,WebFetch');
-  else args.push('--tools', '');
+  const files = req.browseDir ? 'Read,Glob,Grep' : '';
+  if (req.webSearch) {
+    args.push('--tools', files ? `${files},WebSearch,WebFetch` : 'WebSearch,WebFetch', '--allowedTools', 'WebSearch,WebFetch');
+  } else {
+    args.push('--tools', files);
+  }
   if (req.model) args.push('--model', req.model);
   if (req.effort) args.push('--effort', req.effort);
   return [...args, ...extraArgs];
@@ -71,6 +83,9 @@ function activityFor(block: Record<string, unknown>): string | null {
       const name = str(block.name) ?? 'a tool';
       if (name === 'WebSearch' || name === 'web_search') return 'Searching the web…';
       if (name === 'WebFetch' || name === 'web_fetch') return 'Reading a web page…';
+      if (name === 'Read') return 'Reading a document…';
+      if (name === 'Grep') return 'Searching the library…';
+      if (name === 'Glob') return 'Listing documents…';
       return `Using ${name}…`;
     }
     case 'text':

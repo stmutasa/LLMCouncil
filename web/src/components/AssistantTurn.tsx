@@ -1,26 +1,32 @@
-import { ChevronsDownUp, ChevronsUpDown, RotateCcw } from 'lucide-react';
+import { ChevronsDownUp, ChevronsUpDown, NotebookText, RotateCcw } from 'lucide-react';
 import { memo, useState } from 'react';
 import type { Turn } from '../../../shared/types';
 import { openSettings, regenerateTurn } from '../actions';
 import { useFollowing } from '../hooks/followContext';
 import { separateAnalysisEntries } from '../lib/analysis';
+import type { CitationLookup } from '../lib/citations';
 import { answerPlaceholder, finalSourceLabel, isArbiterPhase, memberInfo } from '../lib/turn';
 import { useStore, type StreamState } from '../store';
 import { BillingBadge } from './BillingBadge';
+import { CitationContext } from './Citation';
 import { CopyButton } from './CopyButton';
 import { CallMeta, Deliberation } from './Deliberation';
 import { Disclosure } from './Disclosure';
 import { MemberDot, Spinner, WarningIcon } from './icons';
 import { Markdown } from './Markdown';
+import { SaveToNotionDialog } from './SaveToNotionDialog';
+import { TurnSources } from './SourcesBlock';
 
 interface AssistantTurnProps {
   turn: Turn;
   conversationId: string;
   isLast: boolean;
   streamState: StreamState | null;
+  /** Citation ids the turn's text can refer to (its own library and earlier turns'). */
+  citations: CitationLookup;
 }
 
-export const AssistantTurn = memo(function AssistantTurn({ turn, conversationId, isLast, streamState }: AssistantTurnProps) {
+export const AssistantTurn = memo(function AssistantTurn({ turn, conversationId, isLast, streamState, citations }: AssistantTurnProps) {
   const running = turn.status === 'running';
   const hasFinal = turn.finalText.trim().length > 0;
   const council = turn.mode === 'council';
@@ -45,7 +51,9 @@ export const AssistantTurn = memo(function AssistantTurn({ turn, conversationId,
   const showAnalysis = council && turn.analysisText.trim().length > 0;
 
   return (
+    <CitationContext.Provider value={citations}>
     <article className="assistant-turn" aria-label="Council answer" aria-busy={running || undefined}>
+      <TurnSources turn={turn} />
       {council ? (
         <Deliberation
           turn={turn}
@@ -91,6 +99,7 @@ export const AssistantTurn = memo(function AssistantTurn({ turn, conversationId,
         />
       )}
     </article>
+    </CitationContext.Provider>
   );
 });
 
@@ -193,7 +202,9 @@ interface TurnActionsProps {
 
 function TurnActions({ turn, conversationId, isLast, deliberationOpen, onToggleDeliberation }: TurnActionsProps) {
   const regenerating = useStore((s) => s.turnActions[turn.id] === 'regenerate');
+  const notionConnected = useStore((s) => s.notion.status?.connected === true);
   const [error, setError] = useState<string | null>(null);
+  const [savingToNotion, setSavingToNotion] = useState(false);
   const hasFinal = turn.finalText.trim().length > 0;
 
   const onRegenerate = async () => {
@@ -211,6 +222,12 @@ function TurnActions({ turn, conversationId, isLast, deliberationOpen, onToggleD
           <span>{regenerating ? 'Regenerating…' : 'Regenerate'}</span>
         </button>
       )}
+      {hasFinal && notionConnected && (
+        <button type="button" className="action-button" onClick={() => setSavingToNotion(true)} aria-haspopup="dialog">
+          <NotebookText size={14} aria-hidden="true" />
+          <span>Save to Notion</span>
+        </button>
+      )}
       {onToggleDeliberation && (
         <button type="button" className="action-button" onClick={onToggleDeliberation} aria-expanded={deliberationOpen}>
           {deliberationOpen ? <ChevronsDownUp size={14} aria-hidden="true" /> : <ChevronsUpDown size={14} aria-hidden="true" />}
@@ -222,6 +239,7 @@ function TurnActions({ turn, conversationId, isLast, deliberationOpen, onToggleD
           {error}
         </p>
       )}
+      {savingToNotion && <SaveToNotionDialog turn={turn} conversationId={conversationId} onClose={() => setSavingToNotion(false)} />}
     </div>
   );
 }

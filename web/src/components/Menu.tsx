@@ -229,7 +229,7 @@ interface MenuItemProps {
   children: ReactNode;
   /** Present for radio items: whether this one is the current choice. */
   checked?: boolean;
-  description?: string;
+  description?: ReactNode;
   icon?: ReactNode;
   danger?: boolean;
   /** Keep focus where onSelect puts it (e.g. an inline editor) instead of on the menu button. */

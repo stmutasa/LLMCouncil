@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ARBITER_MARKER } from '../../../shared/arbiter';
 import type { RunEvent, Turn } from '../../../shared/types';
 import { applyRunEvent, applyRunEvents } from './reducer';
-import { arbiter, councilTurn, directTurn, response, round } from './testFixtures';
+import { arbiter, councilTurn, directTurn, excerpt, library, response, round } from './testFixtures';
 
 function deepFreeze<T>(value: T): T {
   if (value && typeof value === 'object') {
@@ -13,6 +13,27 @@ function deepFreeze<T>(value: T): T {
 }
 
 describe('applyRunEvent', () => {
+  it('marks the library phase running on library.start', () => {
+    const turn = deepFreeze(councilTurn({ library: library({ status: 'pending' }) }));
+    const next = applyRunEvent(turn, { type: 'library.start' });
+    expect(next.library!.status).toBe('running');
+    expect(next.rounds).toBe(turn.rounds);
+    expect(applyRunEvent(next, { type: 'library.start' })).toBe(next);
+  });
+
+  it('ignores library.start for turns without a library', () => {
+    const turn = deepFreeze(councilTurn());
+    expect(applyRunEvent(turn, { type: 'library.start' })).toBe(turn);
+  });
+
+  it('replaces the library on library.end', () => {
+    const turn = deepFreeze(councilTurn({ library: library({ status: 'running' }) }));
+    const done = library({ status: 'done', queries: ['q'], excerpts: [excerpt('S1', 'a')] });
+    const next = applyRunEvent(turn, { type: 'library.end', library: done });
+    expect(next.library).toBe(done);
+    expect(next.arbiter).toBe(turn.arbiter);
+  });
+
   it('replaces the turn on snapshot and turn.end', () => {
     const turn = deepFreeze(councilTurn());
     const replacement = councilTurn({ finalText: 'done', status: 'complete' });

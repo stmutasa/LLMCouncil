@@ -30,6 +30,11 @@ export interface ProcOptions {
   onData?(text: string): void;
   /** How long to wait for the process to exit after its terminal event. */
   lingerMs?: number;
+  /**
+   * Working directory to run in (the browse mirror). It is not created or removed here. Without
+   * it the CLI runs in a fresh empty temporary directory that is removed afterwards.
+   */
+  cwd?: string;
 }
 
 export interface ProcResult {
@@ -159,7 +164,7 @@ function buildDiagnostics(stdout: string, stderr: string): string {
 }
 
 /**
- * Runs a CLI in a fresh empty directory and streams its stdout. Resolves when the process exits
+ * Runs a CLI in a fresh empty directory (or the given one) and streams its stdout. Resolves when the process exits
  * (whatever the exit code; the adapter decides what it means) or when it lingers after its
  * terminal event. Rejects on spawn failure, timeout and abort, killing the process tree.
  */
@@ -170,9 +175,10 @@ export async function runProcess(o: ProcOptions): Promise<ProcResult> {
       `\`${o.command}\` is started through a Windows command script, which cannot receive a multi-line argument. Switch the provider's prompt delivery to stdin.`,
     );
   }
-  const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-council-'));
+  const ownCwd = o.cwd === undefined;
+  const cwd = o.cwd ?? (await fs.mkdtemp(path.join(os.tmpdir(), 'llm-council-')));
   const removeCwd = () => {
-    fs.rm(cwd, { recursive: true, force: true }).catch(() => undefined);
+    if (ownCwd) fs.rm(cwd, { recursive: true, force: true }).catch(() => undefined);
   };
   if (o.signal?.aborted) {
     removeCwd();

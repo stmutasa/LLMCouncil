@@ -14,6 +14,10 @@ function isTurnLike(v: unknown): boolean {
   return isObject(v) && isString(v.id) && isString(v.status) && Array.isArray(v.rounds) && isString(v.finalText);
 }
 
+function isLibraryLike(v: unknown): boolean {
+  return isObject(v) && isString(v.status) && Array.isArray(v.excerpts) && Array.isArray(v.attachments) && Array.isArray(v.queries);
+}
+
 function isCallLike(v: unknown): boolean {
   return isObject(v) && isString(v.status) && isString(v.text);
 }
@@ -36,6 +40,12 @@ export function parseRunEvent(data: string): RunEvent | null {
     case 'snapshot':
     case 'turn.end':
       ok = isTurnLike(e.turn);
+      break;
+    case 'library.start':
+      ok = true;
+      break;
+    case 'library.end':
+      ok = isLibraryLike(e.library);
       break;
     case 'round.start':
       ok = isNumber(e.round);

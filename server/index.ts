@@ -1,6 +1,7 @@
 import { APP_NAME } from '../shared/defaults';
 import { createApp } from './app';
 import { parseCliOptions, type CliOptions } from './options';
+import { killAllWorkers } from './library/extract/extractor';
 import { killAll } from './providers/proc';
 
 async function main(): Promise<void> {
@@ -42,17 +43,22 @@ async function main(): Promise<void> {
     console.log(`\n${signal} received; stopping running turns and CLI processes…`);
     const shutdown = council.shutdown();
     killAll();
+    killAllWorkers();
     server.closeAllConnections?.();
     server.close();
     void shutdown.finally(() => {
       // Anything that ignored SIGTERM must not outlive the server.
       killAll(true);
+      killAllWorkers();
       process.exit(0);
     });
   };
   process.on('SIGINT', () => stop('SIGINT'));
   process.on('SIGTERM', () => stop('SIGTERM'));
 }
+
+// However the process ends, an extraction worker must not outlive it.
+process.on('exit', () => killAllWorkers());
 
 // A defect in one request must not take the whole server, and every running turn, down with it.
 process.on('unhandledRejection', (reason) => {
@@ -62,5 +68,6 @@ process.on('unhandledRejection', (reason) => {
 void main().catch((err: unknown) => {
   console.error('The server failed to start:', err);
   killAll(true);
+  killAllWorkers();
   process.exit(1);
 });

@@ -4,12 +4,14 @@ import type { Settings } from '../../../../shared/types';
 import { closeSettings, saveSettingsDraft } from '../../actions';
 import { NARROW_QUERY, useMediaQuery } from '../../hooks/useMediaQuery';
 import { errorMessage } from '../../api';
+import { withLiveLibrary } from '../../lib/library';
 import { settingsEqual, tabForErrorKey, validateSettings } from '../../lib/settings';
 import { useStore, type SettingsTab } from '../../store';
 import { ConfirmDialog, Dialog } from '../Dialog';
 import { ArbiterTab } from './ArbiterTab';
 import { CouncilTab } from './CouncilTab';
 import { GeneralTab } from './GeneralTab';
+import { LibraryTab } from './LibraryTab';
 import { ProtocolTab } from './ProtocolTab';
 import { ProvidersTab } from './ProvidersTab';
 
@@ -17,6 +19,7 @@ const TABS: { id: SettingsTab; label: string }[] = [
   { id: 'council', label: 'Council' },
   { id: 'protocol', label: 'Protocol' },
   { id: 'arbiter', label: 'Arbiter' },
+  { id: 'library', label: 'Library' },
   { id: 'providers', label: 'Providers' },
   { id: 'general', label: 'General' },
 ];
@@ -26,6 +29,11 @@ export type UpdateDraft = (fn: (draft: Settings) => Settings) => void;
 /**
  * Edits a private draft of the settings, captured when the dialog opens. Nothing reaches the
  * store or the server until Save; changes made elsewhere meanwhile never overwrite the draft.
+ *
+ * The exception is the library's sources and Notion save location, which take effect the moment
+ * they change (like the composer's controls). They are not part of the draft at all: the
+ * Library tab shows and edits the live settings, the draft is compared and saved with the live
+ * values substituted, so an open draft and those immediate changes can never undo each other.
  */
 export function SettingsDialog() {
   const initialTab = useStore((s) => s.settingsDialog.tab);
@@ -45,7 +53,11 @@ export function SettingsDialog() {
   const errors = useMemo(() => (draft ? validateSettings(draft, providerIds) : {}), [draft, providerIds]);
   const errorCount = Object.keys(errors).length;
   const tabsWithErrors = useMemo(() => new Set(Object.keys(errors).map(tabForErrorKey)), [errors]);
-  const dirty = draft !== null && baseline !== null && !settingsEqual(draft, baseline);
+  const dirty =
+    draft !== null &&
+    baseline !== null &&
+    settings !== null &&
+    !settingsEqual(withLiveLibrary(draft, settings), withLiveLibrary(baseline, settings));
 
   if (!draft || !baseline) return null;
 
@@ -132,6 +144,7 @@ export function SettingsDialog() {
           {tab === 'council' && <CouncilTab draft={draft} update={update} errors={errors} />}
           {tab === 'protocol' && <ProtocolTab draft={draft} update={update} errors={errors} />}
           {tab === 'arbiter' && <ArbiterTab draft={draft} update={update} errors={errors} />}
+          {tab === 'library' && <LibraryTab draft={draft} update={update} errors={errors} />}
           {tab === 'providers' && <ProvidersTab draft={draft} saved={baseline} update={update} errors={errors} />}
           {tab === 'general' && <GeneralTab draft={draft} update={update} errors={errors} />}
         </div>
@@ -162,7 +175,14 @@ export function SettingsDialog() {
       {confirmDiscard && (
         <ConfirmDialog
           title="Discard unsaved changes?"
-          message={<p>Your changes to the settings have not been saved.</p>}
+          message={
+            <p>
+              Your changes to the settings have not been saved.
+              {settings && baseline && JSON.stringify(settings.library.sources) !== JSON.stringify(baseline.library.sources)
+                ? ' Changes to library sources were saved when you made them and stay.'
+                : ''}
+            </p>
+          }
           confirmLabel="Discard changes"
           cancelLabel="Keep editing"
           danger

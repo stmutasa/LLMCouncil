@@ -1,6 +1,6 @@
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, promises as fsp, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { LIMITS, ROLES } from '../shared/defaults';
@@ -9,10 +9,18 @@ import type {
   MetaResponse,
   ProviderTestResult,
   RunEvent,
+  SaveToNotionResponse,
   SendTurnResponse,
+  SourceExcerpt,
   Turn,
 } from '../shared/types';
-import { checkMessage, planTurn, TurnPlanError, type TurnPlan } from './engine/plan';
+import type { StoredTurnLibrary } from './engine/libraryPhase';
+import { checkAttachments, checkMessage, planTurn, TurnPlanError, type TurnPlan } from './engine/plan';
+import type { Extractor } from './library/extract/extractor';
+import { listDirectories, revealFile, type DirOptions, type Spawner } from './library/fsDirs';
+import { Library, LibraryError } from './library/library';
+import type { FetchFn } from './library/notionClient';
+import { DOC_ID_RE } from './library/store';
 import { markInterrupted } from './engine/turnState';
 import { ProviderRegistry } from './providers/registry';
 import { ProviderError } from './providers/types';
@@ -38,6 +46,15 @@ export interface AppOptions {
   rng?: () => number;
   registry?: ProviderRegistry;
   coalesceMs?: number;
+  /** Library dependencies tests replace (extraction worker, Notion's fetch, file manager…). */
+  library?: {
+    extractor?: Extractor;
+    notionFetch?: FetchFn;
+    notionSleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+    autoSync?: boolean;
+    spawner?: Spawner;
+    dirs?: DirOptions;
+  };
 }
 
 export interface CouncilApp {
@@ -46,7 +63,8 @@ export interface CouncilApp {
   storage: Storage;
   settings: SettingsStore;
   registry: ProviderRegistry;
-  /** Stops every run (turns end as interrupted) and waits briefly for them to be saved. */
+  library: Library;
+  /** Stops every run (turns end as interrupted) and every sync, and waits briefly for them to be saved. */
   shutdown(): Promise<void>;
 }
 
@@ -103,7 +121,23 @@ export async function createApp(options: AppOptions): Promise<CouncilApp> {
   const settingsStore = new SettingsStore(dataDir, mock);
   await settingsStore.load();
   const registry = options.registry ?? new ProviderRegistry({ mock });
-  const runs = new RunManager({ storage, providers: registry, rng: options.rng, coalesceMs: options.coalesceMs });
+  const library = new Library({
+    dataDir,
+    settings: () => settingsStore.get(),
+    saveSettings: (next) => settingsStore.save(next),
+    extractor: options.library?.extractor,
+    notionFetch: options.library?.notionFetch,
+    notionSleep: options.library?.notionSleep,
+    autoSync: options.library?.autoSync,
+  });
+  await library.init();
+  const runs = new RunManager({
+    storage,
+    providers: registry,
+    rng: options.rng,
+    coalesceMs: options.coalesceMs,
+    library,
+  });
   const version = appVersion();
 
   /** A conversation as clients should see it: live turn overlaid, stale 'running' turns repaired. */
@@ -160,7 +194,11 @@ export async function createApp(options: AppOptions): Promise<CouncilApp> {
 
   api.put('/settings', async (req, res) => {
     if (!isPlainObject(req.body)) throw new HttpError(400, 'Send the complete settings object as JSON.');
-    res.json(await settingsStore.save(req.body));
+    const previous = settingsStore.get();
+    const saved = await settingsStore.save(req.body);
+    // Removing documents and starting syncs happens in the background; a save never waits on a sync.
+    void library.reconcile(saved, previous);
+    res.json(saved);
   });
 
   api.get('/providers', async (req, res) => {
@@ -273,9 +311,12 @@ export async function createApp(options: AppOptions): Promise<CouncilApp> {
     res.status(204).end();
   });
 
-  function plan(message: string): { plan: TurnPlan; settings: ReturnType<SettingsStore['get']> } {
+  function plan(message: string, attachments: string[] = []): { plan: TurnPlan; settings: ReturnType<SettingsStore['get']> } {
     const settings = settingsStore.get();
-    return { plan: planTurn(message, settings, (id) => registry.label(id, settings)), settings };
+    return {
+      plan: planTurn(message, settings, (id) => registry.label(id, settings), new Date(), attachments),
+      settings,
+    };
   }
 
   const BUSY = 'This conversation already has a running turn. Stop it or wait for it to finish.';
@@ -283,10 +324,11 @@ export async function createApp(options: AppOptions): Promise<CouncilApp> {
   api.post('/turns', async (req, res) => {
     if (!isPlainObject(req.body)) throw new HttpError(400, 'Send { "message": "…" } as JSON.');
     const message = checkMessage(req.body.message);
+    const attachments = checkAttachments(req.body.attachments);
     const requestedId = req.body.conversationId;
 
     if (requestedId === undefined || requestedId === null) {
-      const { plan: p, settings } = plan(message);
+      const { plan: p, settings } = plan(message, attachments);
       const now = p.turn.createdAt;
       const conversation: Conversation = {
         id: randomUUID(),
@@ -310,7 +352,7 @@ export async function createApp(options: AppOptions): Promise<CouncilApp> {
     if (runs.has(requestedId)) throw new HttpError(409, BUSY);
     const existing = await storage.load(requestedId);
     if (!existing) throw new HttpError(404, 'Conversation not found.');
-    const { plan: p, settings } = plan(message);
+    const { plan: p, settings } = plan(message, attachments);
     const run = runs.create(requestedId, p, settings);
     if (!run) throw new HttpError(409, BUSY);
     let saved: Conversation | null;
@@ -355,7 +397,9 @@ export async function createApp(options: AppOptions): Promise<CouncilApp> {
       const why =
         run.turn.mode === 'direct'
           ? 'Skip to verdict is not available when a single member answers.'
-          : run.control.skipRequested
+          : run.control.phase === 'library'
+            ? 'The library is still being searched; skip to verdict is available once the council starts.'
+            : run.control.skipRequested
             ? 'Skip to verdict was already requested.'
             : 'The arbiter is already writing the verdict.';
       throw new HttpError(409, why);
@@ -372,7 +416,11 @@ export async function createApp(options: AppOptions): Promise<CouncilApp> {
     const index = conversation.turns.findIndex((t) => t.id === tid);
     if (index < 0) throw new HttpError(404, 'Turn not found.');
     if (index !== conversation.turns.length - 1) throw new HttpError(409, 'Only the last turn can be regenerated.');
-    const { plan: p, settings } = plan(conversation.turns[index]!.userMessage);
+    const old = conversation.turns[index]!;
+    const oldLibrary = old.library as StoredTurnLibrary | null;
+    // The regenerated turn reads the same attachments; ids it was given are not carried over.
+    const reattach = oldLibrary?.attachmentIds ?? oldLibrary?.attachments.map((a) => a.documentId) ?? [];
+    const { plan: p, settings } = plan(old.userMessage, reattach.slice(0, LIMITS.maxAttachments));
     const run = runs.create(cid, p, settings);
     if (!run) throw new HttpError(409, BUSY);
     let saved: Conversation | null;
@@ -458,6 +506,137 @@ export async function createApp(options: AppOptions): Promise<CouncilApp> {
     res.end();
   });
 
+  // -------------------------------------------------------------------------------------------
+  // Document library
+
+  api.get('/library', async (_req, res) => {
+    res.json(await library.status());
+  });
+
+  api.post('/library/sources/:id/sync', async (req, res) => {
+    await library.requestSync(String(req.params.id));
+    res.status(204).end();
+  });
+
+  api.post('/library/sources/:id/cancel', async (req, res) => {
+    await library.cancelSync(String(req.params.id));
+    res.status(204).end();
+  });
+
+  const queryString = (value: unknown, name: string): string | undefined => {
+    if (value === undefined) return undefined;
+    if (typeof value !== 'string') throw new HttpError(400, `"${name}" must be given once, as text.`);
+    return value;
+  };
+  const queryInt = (value: unknown, name: string, min: number, max: number, fallback: number): number => {
+    const raw = queryString(value, name);
+    if (raw === undefined || raw === '') return fallback;
+    if (!/^\d+$/.test(raw)) throw new HttpError(400, `"${name}" must be a whole number.`);
+    const n = Number(raw);
+    if (n < min) throw new HttpError(400, `"${name}" must be at least ${min}.`);
+    return Math.min(n, max);
+  };
+
+  api.get('/library/documents', (req, res) => {
+    res.json(
+      library.documents({
+        sourceId: queryString(req.query.sourceId, 'sourceId') || undefined,
+        status: queryString(req.query.status, 'status') || undefined,
+        q: queryString(req.query.q, 'q'),
+        offset: queryInt(req.query.offset, 'offset', 0, Number.MAX_SAFE_INTEGER, 0),
+        limit: queryInt(req.query.limit, 'limit', 1, 200, 50),
+      }),
+    );
+  });
+
+  api.get('/library/documents/:id/text', async (req, res) => {
+    res.json(await library.documentText(String(req.params.id)));
+  });
+
+  api.post('/library/documents/:id/reveal', async (req, res) => {
+    const id = String(req.params.id);
+    if (!DOC_ID_RE.test(id)) throw new HttpError(404, 'There is no document with this id.');
+    // The path comes from the manifest only, never from the request.
+    const file = library.filePath(id);
+    try {
+      await fsp.stat(file);
+    } catch {
+      throw new HttpError(404, 'The file is no longer in its folder. Check the source for changes.');
+    }
+    revealFile(file, options.library?.spawner);
+    res.status(204).end();
+  });
+
+  api.post('/library/search', async (req, res) => {
+    const query = isPlainObject(req.body) ? req.body.query : undefined;
+    if (typeof query !== 'string' || query.trim() === '') throw new HttpError(400, 'Send { "query": "…" } with the words to search for.');
+    if (query.length > 1000) throw new HttpError(400, 'The search is too long; use at most 1,000 characters.');
+    const settings = settingsStore.get();
+    const sourceIds = settings.library.sources.filter((s) => s.enabled).map((s) => s.id);
+    const names = new Map(settings.library.sources.map((s) => [s.id, s.name]));
+    const found = await library.search([query.trim()], { budgetChars: settings.library.excerptChars, sourceIds });
+    const excerpts: SourceExcerpt[] = [];
+    for (const p of found) {
+      const doc = library.document(p.documentId);
+      if (!doc) continue;
+      excerpts.push({
+        id: `S${excerpts.length + 1}`,
+        documentId: doc.id,
+        title: doc.title,
+        sourceName: names.get(doc.sourceId) ?? '',
+        location: doc.location,
+        part: p.part,
+        url: doc.url,
+        text: p.text,
+      });
+    }
+    res.json({ excerpts });
+  });
+
+  api.get('/fs/dirs', async (req, res) => {
+    res.json(await listDirectories(queryString(req.query.path, 'path'), options.library?.dirs));
+  });
+
+  api.get('/library/notion', async (req, res) => {
+    res.json(await library.notionStatus(req.query.refresh === '1' || req.query.refresh === 'true'));
+  });
+
+  api.put('/library/notion/token', async (req, res) => {
+    const token = isPlainObject(req.body) ? req.body.token : undefined;
+    if (typeof token !== 'string' || token.trim() === '') throw new HttpError(400, 'Paste the Notion token.');
+    if (token.length > 4096) throw new HttpError(400, 'That does not look like a Notion token: it is too long.');
+    res.json(await library.connectNotion(token.trim()));
+  });
+
+  api.delete('/library/notion/token', async (_req, res) => {
+    await library.disconnectNotion();
+    res.status(204).end();
+  });
+
+  api.get('/library/notion/pages', async (req, res) => {
+    const q = (queryString(req.query.q, 'q') ?? '').slice(0, 200);
+    res.json({ pages: await library.notionPages(q) });
+  });
+
+  api.post('/conversations/:cid/turns/:tid/notion', async (req, res) => {
+    const cid = conversationIdParam(req, 'cid');
+    const tid = turnIdParam(req);
+    const include = isPlainObject(req.body) ? req.body.includeDeliberation : undefined;
+    if (include !== undefined && typeof include !== 'boolean') {
+      throw new HttpError(400, '"includeDeliberation" must be true or false.');
+    }
+    const live = runs.get(cid);
+    if (live && live.turn.id === tid) throw new HttpError(409, 'This turn is still running. Save it once it has finished.');
+    const conversation = await storage.load(cid);
+    if (!conversation) throw new HttpError(404, 'Conversation not found.');
+    const turn = conversation.turns.find((t) => t.id === tid);
+    if (!turn) throw new HttpError(404, 'Turn not found.');
+    if (turn.status === 'running') throw new HttpError(409, 'This turn is still running. Save it once it has finished.');
+    if (!turn.finalText.trim()) throw new HttpError(400, 'This turn has no final answer to save.');
+    const saved: SaveToNotionResponse = await library.saveToNotion(conversation, turn, include ?? false);
+    res.json(saved);
+  });
+
   api.use((req, _res, next) => {
     next(new HttpError(404, `There is no API endpoint ${req.method} ${req.baseUrl}${req.path}.`));
   });
@@ -496,7 +675,7 @@ export async function createApp(options: AppOptions): Promise<CouncilApp> {
     const e = err as { status?: number; statusCode?: number; type?: string; message?: string };
     let status = 500;
     let message = 'Something went wrong on the server.';
-    if (err instanceof HttpError) {
+    if (err instanceof HttpError || err instanceof LibraryError) {
       status = err.status;
       message = err.message;
     } else if (err instanceof SettingsError || err instanceof TurnPlanError || err instanceof InvalidIdError) {
@@ -524,6 +703,10 @@ export async function createApp(options: AppOptions): Promise<CouncilApp> {
     storage,
     settings: settingsStore,
     registry,
-    shutdown: () => runs.shutdown(),
+    library,
+    shutdown: async () => {
+      await runs.shutdown();
+      await library.shutdown();
+    },
   };
 }

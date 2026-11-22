@@ -32,3 +32,8 @@ export function plural(count: number, singular: string, pluralForm = `${singular
 export function formatNumber(n: number): string {
   return n.toLocaleString('en-US');
 }
+
+/** Like `plural`, with thousands separators: "1,204 documents". */
+export function count(n: number, singular: string, pluralForm = `${singular}s`): string {
+  return `${formatNumber(n)} ${n === 1 ? singular : pluralForm}`;
+}

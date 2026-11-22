@@ -70,6 +70,40 @@ const arbiter = z.looseObject({
   analysisEnabled: z.boolean(),
 });
 
+const excerpt = z.looseObject({
+  id: z.string(),
+  documentId: z.string(),
+  title: z.string(),
+  sourceName: z.string(),
+  location: z.string(),
+  part: z.string(),
+  url: z.string().nullable(),
+  text: z.string(),
+});
+
+const attachment = z.looseObject({
+  id: z.string(),
+  documentId: z.string(),
+  title: z.string(),
+  sourceName: z.string(),
+  location: z.string(),
+  url: z.string().nullable(),
+  chars: z.number(),
+  truncated: z.boolean(),
+  problem: z.string(),
+});
+
+const turnLibrary = z.looseObject({
+  mode: z.enum(['off', 'search', 'browse']),
+  status: z.enum(['pending', 'running', 'done', 'error']),
+  queries: z.array(z.string()),
+  plannerNote: z.string(),
+  excerpts: z.array(excerpt),
+  attachments: z.array(attachment),
+  browsableDocuments: z.number(),
+  error: z.string().nullable(),
+});
+
 const turn = z.looseObject({
   id: z.string(),
   createdAt: z.string(),
@@ -84,6 +118,9 @@ const turn = z.looseObject({
   rounds: z.array(round),
   arbiter: arbiter.nullable(),
   analysisText: z.string(),
+  // Files written before the library existed have no such field; a damaged one is dropped rather
+  // than making the whole conversation unreadable.
+  library: turnLibrary.nullable().optional().catch(null).transform((v) => v ?? null),
   finalText: z.string(),
   finalSource: z.looseObject({
     kind: z.enum(['arbiter', 'member', 'fallback', 'none']),

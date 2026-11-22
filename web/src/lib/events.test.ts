@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseRunEvent } from './events';
-import { arbiter, councilTurn, response, round } from './testFixtures';
+import { arbiter, councilTurn, library, response, round } from './testFixtures';
 
 describe('parseRunEvent', () => {
   it('accepts every well-formed event type', () => {
@@ -8,6 +8,8 @@ describe('parseRunEvent', () => {
     const events = [
       { type: 'snapshot', turn },
       { type: 'turn.end', turn },
+      { type: 'library.start' },
+      { type: 'library.end', library: library() },
       { type: 'round.start', round: 0 },
       { type: 'member.start', round: 0, memberId: 'a', startedAt: 'x' },
       { type: 'member.delta', round: 0, memberId: 'a', text: 'x', replace: false },
@@ -40,5 +42,7 @@ describe('parseRunEvent', () => {
     expect(parseRunEvent(JSON.stringify({ type: 'member.end', round: 0, response: { status: 'done', text: '' } }))).toBeNull();
     expect(parseRunEvent(JSON.stringify({ type: 'round.end', round: 0, result: {} }))).toBeNull();
     expect(parseRunEvent(JSON.stringify({ type: 'arbiter.end', arbiter: arbiter(), finalText: 'f' }))).toBeNull();
+    expect(parseRunEvent(JSON.stringify({ type: 'library.end' }))).toBeNull();
+    expect(parseRunEvent(JSON.stringify({ type: 'library.end', library: { status: 'done', excerpts: [] } }))).toBeNull();
   });
 });

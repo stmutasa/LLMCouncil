@@ -96,6 +96,13 @@ export class ProviderRegistry implements ProviderSource {
     return BUILTINS.find((b) => b.desc.id === id)?.desc.webSearch ?? 'none';
   }
 
+  /** Whether the provider can open library files itself; custom CLIs never get the mirror. */
+  browseSupport(id: string): ProviderInfo['browse'] {
+    const builtin = BUILTINS.find((b) => b.desc.id === id);
+    if (builtin) return builtin.desc.browse;
+    return id === MOCK_ID ? 'yes' : 'no';
+  }
+
   timeoutMs(id: string, settings: Settings): number {
     return timeoutMsFor(settings, id);
   }
@@ -130,6 +137,7 @@ export class ProviderRegistry implements ProviderSource {
           effortLevels: [],
           webSearch: 'none',
           streams: true,
+          browse: id === MOCK_ID ? 'yes' : 'no',
           modelSuggestions: [],
           canListModels: false,
           installHint: '',

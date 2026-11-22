@@ -1,5 +1,8 @@
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import { ARBITER_MARKER } from '../../shared/arbiter';
 import type { ProviderInfo } from '../../shared/types';
+import { PLANNER_INTRO } from '../library/planner';
 import { abortError, ProviderError, type Provider, type RunRequest } from './types';
 
 export const MOCK_ID = 'mock';
@@ -60,12 +63,45 @@ function reviewText(name: string, prompt: string): string {
   return `${parts.join('\n\n')}\n\nFINAL RANKING:\n${ranking}`;
 }
 
-function arbiterText(name: string, prompt: string, withMarker: boolean): string {
+/** Context the mock picks up outside the prompt text. */
+export interface MockContext {
+  /** Browse mode: the number of documents INDEX.md in the working directory lists. */
+  browseDocuments?: number | null;
+}
+
+/** A sentence citing the first passage and attachment the prompt offers, so citations can be exercised. */
+function citations(prompt: string): string {
+  const s = /<source id="(S\d+)"/.exec(prompt)?.[1];
+  const d = /<document id="(D\d+)"/.exec(prompt)?.[1];
+  const refs = [s, d].filter(Boolean).map((id) => `[${id}]`);
+  return refs.length ? `The user's documents bear on this ${refs.join(' ')}.` : '';
+}
+
+function browseNote(name: string, ctx: MockContext): string {
+  const n = ctx.browseDocuments;
+  if (n === undefined || n === null) return '';
+  return `${name} looked through the library: INDEX.md lists ${n} document${n === 1 ? '' : 's'}.`;
+}
+
+const PLAN_STOP = new Set(['what', 'which', 'when', 'where', 'does', 'have', 'with', 'that', 'this', 'from', 'about', 'should', 'would', 'could', 'there', 'their', 'they', 'were', 'will', 'your']);
+
+/** The mock's answer to the search planner: a JSON array built from the question's words. */
+export function plannerReply(prompt: string): string {
+  const q = question(prompt);
+  const words = [...new Set((q.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter((w) => w.length >= 4 && !PLAN_STOP.has(w)))];
+  const queries: string[] = [];
+  for (let i = 0; i < words.length && queries.length < 3; i += 2) queries.push(words.slice(i, i + 2).join(' '));
+  return JSON.stringify(queries);
+}
+
+function arbiterText(name: string, prompt: string, withMarker: boolean, ctx: MockContext): string {
   const q = question(prompt).slice(0, 80);
+  const extra = [citations(prompt), browseNote(name, ctx)].filter(Boolean);
   const final = [
     '## Verdict',
     '',
     `After weighing the council's answers, ${name} recommends the following for “${q}”:`,
+    ...(extra.length ? ['', ...extra] : []),
     '',
     '- Start with the option the members agreed on.',
     '- Check the one point where they disagreed before committing.',
@@ -91,15 +127,17 @@ function arbiterText(name: string, prompt: string, withMarker: boolean): string 
   return `${analysis}\n\n${ARBITER_MARKER}\n\n${final}`;
 }
 
-function answerText(name: string, prompt: string): string {
+function answerText(name: string, prompt: string, ctx: MockContext): string {
   const q = question(prompt).slice(0, 80);
   const revising = prompt.includes('## Your current answer');
+  const extra = [citations(prompt), browseNote(name, ctx)].filter(Boolean);
   return [
     revising ? `**What changed:** ${name} tightened the recommendation after reading the other answers.` : '',
     `### ${name}'s answer`,
     '',
     `${name} considered the question: “${q}”.`,
     '',
+    ...(extra.length ? [...extra, ''] : []),
     '- The main option is sound for most situations.',
     '- One risk deserves attention before deciding.',
     '',
@@ -110,13 +148,25 @@ function answerText(name: string, prompt: string): string {
 }
 
 /** What the mock writes for a prompt; exported for tests. */
-export function mockResponse(prompt: string, flags: Set<string>): string {
+export function mockResponse(prompt: string, flags: Set<string>, ctx: MockContext = {}): string {
+  if (prompt.startsWith(PLANNER_INTRO)) return plannerReply(prompt);
   const name = speakerName(prompt);
   if (/^You are [^\n]+, the arbiter of a council/.test(prompt)) {
-    return arbiterText(name, prompt, !flags.has('plain'));
+    return arbiterText(name, prompt, !flags.has('plain'), ctx);
   }
   if (prompt.includes('## Responses under review')) return reviewText(name, prompt);
-  return answerText(name, prompt);
+  return answerText(name, prompt, ctx);
+}
+
+/** Counts the documents INDEX.md lists, as a CLI browsing the mirror would see them. */
+async function browseCount(dir: string | undefined): Promise<number | null> {
+  if (!dir) return null;
+  try {
+    const index = await fs.readFile(path.join(dir, 'INDEX.md'), 'utf8');
+    return index.split('\n').filter((l) => l.startsWith('- ')).length;
+  } catch {
+    return 0;
+  }
 }
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
@@ -161,6 +211,7 @@ export function mockProvider(): Provider {
         effortLevels: ['low', 'medium', 'high'],
         webSearch: 'none',
         streams: true,
+        browse: 'yes',
         modelSuggestions: ['instant', 'slow', 'fail', 'hang', 'plain'],
         canListModels: false,
         installHint: '',
@@ -193,7 +244,7 @@ export function mockProvider(): Provider {
       if (flags.has('fail')) {
         throw new ProviderError('Mock failure');
       }
-      const text = mockResponse(req.prompt, flags);
+      const text = mockResponse(req.prompt, flags, { browseDocuments: await browseCount(req.browseDir) });
       const words = text.split(/(?<=\s)/);
       const name = speakerName(req.prompt);
       const totalMs = flags.has('slow') ? 8_000 : 600 + (hash(name + req.prompt.length) % 800);
