@@ -1,5 +1,6 @@
 import type {
   ArbiterConfig,
+  LibrarySettings,
   MemberConfig,
   Protocol,
   ProviderSettings,
@@ -19,6 +20,12 @@ export const LIMITS = {
   maxRulesChars: 8_000,
   minTimeoutSec: 10,
   maxTimeoutSec: 3_600,
+  maxLibrarySources: 20,
+  minExcerptChars: 2_000,
+  maxExcerptChars: 200_000,
+  minAttachmentChars: 5_000,
+  maxAttachmentChars: 1_000_000,
+  maxAttachments: 20,
 } as const;
 
 export const ROUND_TYPE_META: Record<RoundType, { title: string; description: string }> = {
@@ -201,6 +208,19 @@ export function defaultArbiter(mock: boolean): ArbiterConfig {
   };
 }
 
+export function defaultLibrary(mock: boolean): LibrarySettings {
+  return {
+    sources: [],
+    mode: 'search',
+    excerptChars: 24_000,
+    attachmentChars: 120_000,
+    // A small, fast model is enough to turn a question into keyword searches.
+    planner: { enabled: true, provider: mock ? 'mock' : 'claude', model: mock ? '' : 'haiku', effort: '' },
+    autoSyncMinutes: 30,
+    notionSaveParent: null,
+  };
+}
+
 export function defaultSettings(mock = false): Settings {
   return {
     version: 1,
@@ -215,6 +235,7 @@ export function defaultSettings(mock = false): Settings {
     stripApiKeys: true,
     providers: {},
     customProviders: [],
+    library: defaultLibrary(mock),
   };
 }
 
