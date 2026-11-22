@@ -168,6 +168,10 @@ The library adds to every call. The passages found for a question (24,000 charac
 
 ## Your documents
 
+![An answer drawn from the library, with citation chips](docs/screenshot-library-answer.png)
+
+![The Sources block: the searches that were run and the passages every model was given](docs/screenshot-library-sources.png)
+
 ### What the library is
 
 The library is a searchable copy, kept on this computer, of the text of your documents. Nothing is uploaded to build it. Text leaves the computer only inside a question: as passages the app found, or as documents you attached. Your original files are never changed.
