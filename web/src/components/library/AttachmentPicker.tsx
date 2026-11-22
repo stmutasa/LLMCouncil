@@ -114,6 +114,7 @@ export function AttachmentPicker({ convKey, onClose }: AttachmentPickerProps) {
                       {whereText([sourceName(doc.sourceId), doc.location])}
                       {off && ' · source turned off'}
                     </span>
+                    {doc.detail && <span className="doc-note">{doc.detail}</span>}
                   </span>
                   <span className="pick-size">{formatChars(doc.chars)}</span>
                 </label>

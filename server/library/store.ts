@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { readFileIfExists, withFileLock, writeFileAtomic } from '../util/fileQueue';
 import type { DocRecord, Manifest, Part, SourceSyncRecord } from './types';
@@ -98,25 +99,82 @@ function parseParts(raw: string): Part[] | null {
   }
 }
 
-/** Files under <data>/library: the manifest and one text file per document. */
+/** The per-user cache directory of the platform. */
+export function userCacheDir(platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = process.env, home = os.homedir()): string {
+  if (platform === 'win32') return env.LOCALAPPDATA || path.win32.join(home, 'AppData', 'Local');
+  if (platform === 'darwin') return path.posix.join(home, 'Library', 'Caches');
+  const xdg = env.XDG_CACHE_HOME;
+  return xdg && path.posix.isAbsolute(xdg) ? xdg : path.posix.join(home, '.cache');
+}
+
+/**
+ * Where the browse mirror lives: outside the data directory, so a CLI working in it cannot reach
+ * secrets.json or the conversations by going up a level. One per data directory.
+ */
+export function defaultBrowseDir(dataDir: string, platform: NodeJS.Platform = process.platform, env: NodeJS.ProcessEnv = process.env, home = os.homedir()): string {
+  const hash = createHash('sha256').update(path.resolve(dataDir)).digest('hex').slice(0, 12);
+  const p = platform === 'win32' ? path.win32 : path.posix;
+  return p.join(userCacheDir(platform, env, home), 'llm-council', `browse-${hash}`);
+}
+
+/**
+ * Creates a directory and any missing parents, each readable by the owner only (0700) where
+ * the platform supports it. Directories that already exist are left as they are, except the
+ * target itself, which is made private.
+ */
+export async function mkdirPrivate(dir: string): Promise<void> {
+  const missing: string[] = [];
+  let current = path.resolve(dir);
+  for (;;) {
+    try {
+      await fs.stat(current);
+      break;
+    } catch {
+      missing.unshift(current);
+      const parent = path.dirname(current);
+      if (parent === current) break;
+      current = parent;
+    }
+  }
+  for (const d of missing) {
+    await fs.mkdir(d, { mode: 0o700 }).catch((err: NodeJS.ErrnoException) => {
+      if (err.code !== 'EEXIST') throw err;
+    });
+    await fs.chmod(d, 0o700).catch(() => undefined);
+  }
+  await fs.chmod(dir, 0o700).catch(() => undefined);
+}
+
+/** Files under <data>/library (the manifest and one text file per document), and the mirror's place. */
 export class LibraryStore {
   readonly root: string;
   readonly manifestFile: string;
   readonly textDir: string;
   readonly browseDir: string;
+  /** Kept in the data directory, outside the mirror. */
   readonly mirrorStateFile: string;
+  /** Where versions before this one kept the mirror (inside the data directory). */
+  readonly legacyBrowseDir: string;
 
-  constructor(readonly dataDir: string) {
+  constructor(
+    readonly dataDir: string,
+    browseDir?: string,
+  ) {
     this.root = path.join(dataDir, 'library');
     this.manifestFile = path.join(this.root, 'manifest.json');
     this.textDir = path.join(this.root, 'text');
-    this.browseDir = path.join(this.root, 'browse');
+    this.browseDir = browseDir ? path.resolve(browseDir) : defaultBrowseDir(dataDir);
     this.mirrorStateFile = path.join(this.root, 'mirror-state.json');
+    this.legacyBrowseDir = path.join(this.root, 'browse');
   }
 
   async init(): Promise<void> {
     await fs.mkdir(this.textDir, { recursive: true });
-    await fs.mkdir(this.browseDir, { recursive: true });
+    // An old mirror inside the data directory sits beside secrets.json; it is not used any more.
+    await fs.rm(this.legacyBrowseDir, { recursive: true, force: true }).catch(async () => {
+      await fs.chmod(this.legacyBrowseDir, 0o755).catch(() => undefined);
+      await fs.rm(this.legacyBrowseDir, { recursive: true, force: true }).catch(() => undefined);
+    });
   }
 
   /** A missing or unusable manifest starts the library empty; it is reported once, never thrown. */

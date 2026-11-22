@@ -97,7 +97,11 @@ export function DocumentBrowser({ sources, onClose }: { sources: LibrarySource[]
                 <span className="doc-row-where">{whereText([sourceName(doc.sourceId), doc.location])}</span>
                 <span className="doc-row-meta">
                   {doc.status === 'ok' ? (
-                    whereText([formatChars(doc.chars), doc.parts > 0 ? count(doc.parts, partNoun(doc.type)) : ''])
+                    <>
+                      {whereText([formatChars(doc.chars), doc.parts > 0 ? count(doc.parts, partNoun(doc.type)) : ''])}
+                      {/* A readable document can carry a note, e.g. an older version is still used. */}
+                      {doc.detail && <span className="doc-note">{doc.detail}</span>}
+                    </>
                   ) : (
                     <>
                       <span className={`badge${doc.status === 'error' ? ' warning' : ''}`}>{STATUS_LABEL[doc.status]}</span>
@@ -181,6 +185,7 @@ function DocumentTextDialog({ document: doc, sourceName, onClose }: { document: 
           </p>
         ) : (
           <>
+            {(data.document.detail || doc.detail) && <p className="doc-note">{data.document.detail || doc.detail}</p>}
             {data.truncated && (
               <p className="field-hint">Only the beginning is shown here; the library holds the whole text.</p>
             )}

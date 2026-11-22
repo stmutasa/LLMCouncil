@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FolderSource } from '../../shared/types';
 import type { FolderScan, ScannedFile } from './sources/folder';
 import { TOO_MANY_FILES } from './sources/folder';
@@ -101,5 +101,55 @@ describe('syncFolder deletions', () => {
     const changed = { ...file('a.txt'), mtimeMs: 2000 };
     await syncFolder(ctx, source, new AbortController().signal, { state: idleState() }, scanOf({ files: [changed, { ...file('gone.txt'), size: 9 }] }));
     expect(reads.map((r) => path.basename(r)).sort()).toEqual(['a.txt', 'gone.txt']);
+  });
+});
+
+describe('SyncQueue cancellation', () => {
+  it('gives up on a job that does not stop, moves on, and lets nothing the job does later count', async () => {
+    const { SyncQueue } = await import('./sync');
+    let releaseStuck: () => void = () => undefined;
+    const ran: string[] = [];
+    const recorded: string[] = [];
+    const queue = new SyncQueue(
+      async (id, _signal, progress) => {
+        ran.push(id);
+        if (id === 'stuck') {
+          // Ignores its signal, like a call blocked on a hung drive.
+          await new Promise<void>((r) => (releaseStuck = r));
+        }
+        if (!progress.abandoned) recorded.push(id);
+      },
+      () => undefined,
+      100,
+    );
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    queue.request('stuck');
+    queue.request('next');
+    expect(queue.state('next', null).phase).toBe('queued');
+    const started = Date.now();
+    await queue.cancel('stuck');
+    expect(Date.now() - started).toBeLessThan(2_000);
+    for (let i = 0; i < 100 && queue.busy; i++) await new Promise((r) => setTimeout(r, 10));
+    expect(ran).toEqual(['stuck', 'next']);
+    expect(queue.busy).toBe(false);
+    expect(queue.state('stuck', null).running).toBe(false);
+    releaseStuck();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(recorded).toEqual(['next']);
+    vi.restoreAllMocks();
+  });
+
+  it('resolves cancel as soon as a well-behaved job stops', async () => {
+    const { SyncQueue } = await import('./sync');
+    const queue = new SyncQueue(
+      (_id, signal) => new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve())),
+      () => undefined,
+      60_000,
+    );
+    queue.request('a');
+    const started = Date.now();
+    await queue.cancel('a');
+    expect(Date.now() - started).toBeLessThan(500);
+    expect(queue.busy).toBe(false);
   });
 });

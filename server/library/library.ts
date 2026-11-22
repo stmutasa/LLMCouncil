@@ -62,6 +62,8 @@ export interface LibraryOptions {
   startDelayMs?: number;
   /** How long a cancel waits for a sync to stop before abandoning it (tests shorten it). */
   cancelWaitMs?: number;
+  /** Where the browse mirror is kept; defaults to a private folder in the user's cache. */
+  browseDir?: string;
 }
 
 function enabledSourceIds(settings: Settings): string[] {
@@ -123,7 +125,7 @@ export class Library {
   private closed = false;
 
   constructor(private readonly options: LibraryOptions) {
-    this.store = new LibraryStore(options.dataDir);
+    this.store = new LibraryStore(options.dataDir, options.browseDir);
     this.secrets = new SecretsStore(options.dataDir);
     this.mirror = new BrowseMirror(this.store);
     this.extractor = options.extractor ?? new WorkerExtractor();

@@ -10,6 +10,8 @@ import {
   breadcrumbs,
   browseNote,
   browseSupport,
+  joinNames,
+  untestedBrowseProviders,
   folderName,
   formatChars,
   groupExcerpts,
@@ -283,14 +285,42 @@ function provider(id: string, browse: ProviderInfo['browse']): ProviderInfo {
 }
 
 describe('browseSupport', () => {
-  it('groups enabled members by what their provider can do', () => {
+  const list = [
+    { ...provider('claude', 'yes'), label: 'Claude' },
+    { ...provider('codex', 'untested'), label: 'ChatGPT' },
+    { ...provider('antigravity', 'untested'), label: 'Gemini' },
+  ];
+
+  it('groups enabled members and the arbiter by what their provider can do', () => {
     const s = defaultSettings();
     s.members.push({ ...s.members[0]!, id: 'x', name: 'Local', provider: 'custom-x' });
     s.members.push({ ...s.members[0]!, id: 'y', name: 'Off', enabled: false });
-    const support = browseSupport(s, [provider('claude', 'yes'), provider('codex', 'untested'), provider('antigravity', 'untested')]);
-    expect(support).toEqual({ yes: ['Claude'], untested: ['ChatGPT', 'Gemini'], no: ['Local'] });
-    expect(browseNote(support)).toBe('Can open files: Claude. Untested: ChatGPT, Gemini. Passages only: Local.');
-    expect(browseNote({ yes: [], untested: [], no: ['A'] })).toBe('Passages only: A.');
+    expect(browseSupport(s, list)).toEqual({ yes: ['Claude', 'the arbiter (Claude)'], untested: ['ChatGPT', 'Gemini'], no: ['Local'] });
+    const solo = defaultSettings();
+    solo.members = [solo.members[1]!];
+    expect(browseSupport(solo, list)).toEqual({ yes: [], untested: ['ChatGPT'], no: [] });
+  });
+
+  it('lists untested CLIs as passages only unless the user allowed them', () => {
+    const support = { yes: ['Claude'], untested: ['ChatGPT', 'Gemini'], no: ['Local'] };
+    expect(browseNote(support, false)).toBe('Can open files: Claude. Passages only: ChatGPT, Gemini, Local.');
+    expect(browseNote(support, true)).toBe('Can open files: Claude, ChatGPT (unverified), Gemini (unverified). Passages only: Local.');
+    expect(browseNote({ yes: [], untested: [], no: ['A'] }, false)).toBe('Passages only: A.');
+  });
+
+  it('names the untested providers used by any member or the arbiter', () => {
+    const s = defaultSettings();
+    expect(untestedBrowseProviders(s, list)).toEqual(['ChatGPT', 'Gemini']);
+    s.members[1]!.enabled = false;
+    expect(untestedBrowseProviders(s, list)).toEqual(['ChatGPT', 'Gemini']);
+    const claudeOnly = defaultSettings();
+    claudeOnly.members = [claudeOnly.members[0]!];
+    expect(untestedBrowseProviders(claudeOnly, list)).toEqual([]);
+    claudeOnly.arbiter.provider = 'antigravity';
+    expect(untestedBrowseProviders(claudeOnly, list)).toEqual(['Gemini']);
+    expect(joinNames(['ChatGPT', 'Gemini'])).toBe('ChatGPT and Gemini');
+    expect(joinNames(['A', 'B', 'C'])).toBe('A, B and C');
+    expect(joinNames(['A'])).toBe('A');
   });
 });
 

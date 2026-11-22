@@ -212,6 +212,7 @@ export function defaultLibrary(mock: boolean): LibrarySettings {
   return {
     sources: [],
     mode: 'search',
+    browseUntested: false,
     excerptChars: 24_000,
     attachmentChars: 120_000,
     // A small, fast model is enough to turn a question into keyword searches.

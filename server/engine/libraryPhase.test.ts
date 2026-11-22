@@ -145,10 +145,16 @@ async function runOne(opts: {
   history?: Turn[];
   attachments?: string[];
   stopWhen?: (e: RunEvent) => boolean;
+  /** Overrides the browse capability reported for a provider id. */
+  browseSupport?: Record<string, 'yes' | 'untested' | 'no'>;
 }) {
   const settings = opts.settings ?? baseSettings();
   const calls: Call[] = [];
-  const providers = source(calls);
+  const base = source(calls);
+  const providers: ProviderSource = {
+    ...base,
+    browseSupport: (id, st) => opts.browseSupport?.[id] ?? base.browseSupport?.(id, st) ?? 'no',
+  };
   const plan = planTurn(opts.message, settings, (id) => id, new Date(), opts.attachments ?? []);
   const conversation: Conversation = {
     id: '00000000-0000-0000-0000-000000000001',
@@ -445,6 +451,29 @@ describe('library phase', () => {
     expect(arbiter.browseDir).toBe(browseDir);
     // The mock read INDEX.md in its working directory.
     expect(turn.rounds[0]!.responses.find((r) => r.memberId === 'm-claude')!.text).toContain('INDEX.md lists 2 documents');
+  });
+
+  it('gives the mirror to a CLI with unverified file access only when the user allows it', async () => {
+    await freshLibrary();
+    const round1Plain = async (browseUntested: boolean) => {
+      const settings = baseSettings((s) => {
+        s.library.mode = 'browse';
+        s.library.browseUntested = browseUntested;
+        s.members[2]!.provider = 'plain';
+      });
+      const { calls } = await runOne({ library: lib, settings, message: 'turbine facts', browseSupport: { plain: 'untested' } });
+      return calls.find((c) => c.provider === 'plain' && c.prompt.includes('## Your task (round 1'))!;
+    };
+
+    const withheld = await round1Plain(false);
+    expect(withheld.browseDir).toBeUndefined();
+    expect(withheld.prompt).not.toContain("## The user's document library");
+    // It still gets the same passages as everyone else.
+    expect(withheld.prompt).toContain("## Source material from the user's library");
+
+    const allowed = await round1Plain(true);
+    expect(allowed.browseDir).toBe(browseDir);
+    expect(allowed.prompt).toContain("## The user's document library");
   });
 
   it('stops during the library phase', async () => {

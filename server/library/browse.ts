@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { readFileIfExists, writeFileAtomic } from '../util/fileQueue';
 import { partNoun, renderParts, where } from './render';
-import type { LibraryStore } from './store';
+import { mkdirPrivate, type LibraryStore } from './store';
 import type { DocRecord, Part } from './types';
 
 export const INDEX_FILE = 'INDEX.md';
@@ -220,7 +220,7 @@ async function forceRemove(target: string): Promise<void> {
  * it, so a CLI reading the mirror never finds the file missing.
  */
 async function writeReadOnly(file: string, content: string): Promise<{ size: number; mtimeMs: number }> {
-  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   const tmp = path.join(path.dirname(file), `.${path.basename(file)}.${randomUUID().slice(0, 8)}.tmp`);
   try {
     await fs.writeFile(tmp, content, { encoding: 'utf8', mode: 0o444 });
@@ -309,7 +309,8 @@ export class BrowseMirror {
   ): Promise<{ documents: number; written: number; removed: number }> {
     await this.loadState();
     const root = this.store.browseDir;
-    await fs.mkdir(root, { recursive: true });
+    // A cache can be cleared at any time; the mirror is simply created again.
+    await mkdirPrivate(root);
     const entries = layoutMirror(sources, records);
     const expected = new Map<string, { fp: string; content: () => Promise<string> }>();
     for (const e of entries) {

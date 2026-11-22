@@ -229,6 +229,12 @@ export interface LibrarySettings {
   sources: LibrarySource[];
   /** How questions use the library; chosen in the composer. */
   mode: LibraryMode;
+  /**
+   * In browse mode, also give the library's files to CLIs that have file tools but have not been
+   * shown to stay inside the library folder (`ProviderInfo.browse === 'untested'`). Off by
+   * default: such CLIs then receive passages only.
+   */
+  browseUntested: boolean;
   /** Characters of retrieved passages added to each prompt. */
   excerptChars: number;
   /** Characters of attached documents added to each prompt, shared between them. */

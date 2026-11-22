@@ -102,7 +102,14 @@ async function waitIdle(cid: string) {
 
 beforeAll(async () => {
   dir = await mkdtemp(path.join(os.tmpdir(), 'council-http-'));
-  council = await createApp({ dataDir: dir, mock: true, staticDir: null, coalesceMs: 10, rng: () => 0.3 });
+  council = await createApp({
+    dataDir: dir,
+    mock: true,
+    staticDir: null,
+    coalesceMs: 10,
+    rng: () => 0.3,
+    library: { browseDir: path.join(dir, 'test-cache', 'browse'), autoSync: false },
+  });
   server = council.app.listen(0, '127.0.0.1');
   await new Promise<void>((r) => server.once('listening', () => r()));
   port = (server.address() as AddressInfo).port;
@@ -493,7 +500,12 @@ describe('static files', () => {
     const webDir = await mkdtemp(path.join(os.tmpdir(), 'council-web-'));
     const dataDir = path.join(webDir, 'data');
     await mkdir(path.join(webDir, 'dist'));
-    const withDist = await createApp({ dataDir, mock: true, staticDir: path.join(webDir, 'dist') });
+    const withDist = await createApp({
+      dataDir,
+      mock: true,
+      staticDir: path.join(webDir, 'dist'),
+      library: { browseDir: path.join(dataDir, 'test-cache', 'browse'), autoSync: false },
+    });
     const srv = withDist.app.listen(0, '127.0.0.1');
     await new Promise<void>((r) => srv.once('listening', () => r()));
     const p = (srv.address() as AddressInfo).port;

@@ -60,11 +60,36 @@ function sameRecord(a: DocRecord | undefined, b: DocRecord): boolean {
   return (Object.keys(b) as (keyof DocRecord)[]).every((k) => a[k] === b[k]);
 }
 
+export const STALE_PREFIX = 'The latest version could not be read';
+
+/** The record keeps the previous good text because the latest version failed to read. */
+export function isStale(r: DocRecord): boolean {
+  return r.status === 'ok' && r.detail.startsWith(STALE_PREFIX);
+}
+
 /**
  * Applies one extraction result: writes the text file for readable documents and removes the
- * stale one otherwise. Returns the record to store.
+ * stale one otherwise. Returns the record to store. A document that has good text and fails to
+ * read this time (a half-downloaded cloud file, a timeout, a server error) keeps its previous
+ * text and stays searchable; its old size and date are kept, so the next sync tries again.
  */
-async function applyResult(ctx: SyncContext, base: DocRecord, result: ExtractResult): Promise<DocRecord> {
+async function applyResult(
+  ctx: SyncContext,
+  base: DocRecord,
+  result: ExtractResult,
+  previous: DocRecord | undefined,
+  hasText: boolean,
+): Promise<DocRecord> {
+  if (result.status === 'error' && previous?.status === 'ok' && hasText) {
+    const reason = result.detail.replace(/\.$/, '');
+    return {
+      ...previous,
+      title: base.title,
+      location: base.location,
+      url: base.url,
+      detail: `${STALE_PREFIX} (${reason}); the previous version is still used.`,
+    };
+  }
   if (result.status === 'ok') {
     try {
       await ctx.store.writeParts(base.id, result.parts);
@@ -135,6 +160,7 @@ export async function syncFolder(
       const next: DocRecord = { ...base, status: known.status, detail: known.detail };
       if (!sameRecord(before, next)) {
         if (before?.status === 'ok') await ctx.store.deleteParts(base.id);
+        if (signal.aborted) throw abortError();
         ctx.records.set(next.id, next);
         changed = true;
       }
@@ -146,6 +172,7 @@ export async function syncFolder(
       before.mtimeMs === f.mtimeMs &&
       before.extractorVersion === EXTRACTOR_VERSION &&
       before.status !== 'error' &&
+      !isStale(before) &&
       (before.status !== 'ok' || stored.has(before.id));
     if (!unchanged) toRead.push(base);
   }
@@ -171,7 +198,12 @@ export async function syncFolder(
     const file = path.join(source.path, ...base.key.split('/'));
     const result = await ctx.extractor.extract(file, base.type, signal, source.path);
     if (signal.aborted) throw abortError();
-    ctx.records.set(base.id, await applyResult(ctx, base, result));
+    const previous = existing.get(base.key);
+    const record = await applyResult(ctx, base, result, previous, previous !== undefined && stored.has(previous.id));
+    // A file read before a cancel is kept, unless the queue has given up on this job (then the
+    // source may be gone or owned by a newer job; a stray text file is cleaned up later).
+    if (progress.abandoned) throw abortError();
+    ctx.records.set(base.id, record);
     changed = true;
     progress.state.done++;
     if (progress.state.done % PERSIST_EVERY === 0) await ctx.persist();
@@ -227,11 +259,13 @@ export async function syncNotion(
       before.modifiedAt === page.lastEdited &&
       before.extractorVersion === EXTRACTOR_VERSION &&
       before.status !== 'error' &&
+      !isStale(before) &&
       (before.status !== 'ok' || stored.has(before.id));
     if (unchanged) {
       // A parent can be renamed without the page itself changing.
       const next = { ...before, title: base.title, location: base.location, url: base.url };
       if (!sameRecord(before, next)) {
+        if (signal.aborted) throw abortError();
         ctx.records.set(next.id, next);
         changed = true;
       }
@@ -242,6 +276,7 @@ export async function syncNotion(
 
   if (en.complete) {
     for (const [key, r] of existing) {
+      if (signal.aborted) throw abortError();
       if (en.pages.has(key)) continue;
       ctx.records.delete(r.id);
       await ctx.store.deleteParts(r.id);
@@ -274,7 +309,12 @@ export async function syncNotion(
       result = { status: 'error', detail: (err as Error).message };
     }
     if (signal.aborted) throw abortError();
-    ctx.records.set(base.id, await applyResult(ctx, base, result));
+    const previous = existing.get(page.id);
+    const record = await applyResult(ctx, base, result, previous, previous !== undefined && stored.has(previous.id));
+    // A file read before a cancel is kept, unless the queue has given up on this job (then the
+    // source may be gone or owned by a newer job; a stray text file is cleaned up later).
+    if (progress.abandoned) throw abortError();
+    ctx.records.set(base.id, record);
     changed = true;
     progress.state.done++;
     if (progress.state.done % PERSIST_EVERY === 0) await ctx.persist();

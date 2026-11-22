@@ -183,11 +183,15 @@ class TurnRunner {
     };
   }
 
-  /** Whether this provider's calls run in the browse mirror (browse mode, a capable CLI). */
+  /**
+   * Whether this provider's calls run in the browse mirror. A CLI verified to stay inside its
+   * working folder always may; one with file tools whose confinement is unverified only when the
+   * user has allowed it, because such a CLI could read other files on the computer.
+   */
   private browses(providerId: string): boolean {
     if (!this.material?.browseDir) return false;
     const support = this.input.providers.browseSupport?.(providerId, this.input.settings) ?? 'no';
-    return support !== 'no';
+    return support === 'yes' || (support === 'untested' && this.input.settings.library.browseUntested);
   }
 
   private roundInfo(index: number): RoundPromptInfo {

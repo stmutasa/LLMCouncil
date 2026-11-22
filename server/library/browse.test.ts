@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { BrowseMirror, indexContent, layoutMirror, safeSegment, type MirrorSource } from './browse';
-import { LibraryStore } from './store';
+import { defaultBrowseDir, LibraryStore } from './store';
 import type { DocRecord, Part } from './types';
 
 function rec(over: Partial<DocRecord> & { id: string; key: string; sourceId: string }): DocRecord {
@@ -114,6 +114,21 @@ describe('mirror layout', () => {
   });
 });
 
+describe('mirror location', () => {
+  it('is a per-data-directory folder in the platform cache, never inside the data directory', () => {
+    const linux = defaultBrowseDir('/home/u/council/data', 'linux', {}, '/home/u');
+    expect(linux).toMatch(/^\/home\/u\/\.cache\/llm-council\/browse-[0-9a-f]{12}$/);
+    expect(defaultBrowseDir('/home/u/council/data', 'linux', { XDG_CACHE_HOME: '/xdg' }, '/home/u')).toMatch(/^\/xdg\/llm-council\/browse-/);
+    expect(defaultBrowseDir('/home/u/council/data', 'linux', { XDG_CACHE_HOME: 'relative' }, '/home/u')).toMatch(/^\/home\/u\/\.cache\//);
+    expect(defaultBrowseDir('/Users/u/data', 'darwin', {}, '/Users/u')).toMatch(/^\/Users\/u\/Library\/Caches\/llm-council\/browse-/);
+    expect(defaultBrowseDir('C:\\data', 'win32', { LOCALAPPDATA: 'C:\\Users\\u\\AppData\\Local' }, 'C:\\Users\\u')).toMatch(
+      /^C:\\Users\\u\\AppData\\Local\\llm-council\\browse-[0-9a-f]{12}$/,
+    );
+    expect(defaultBrowseDir('/a/data', 'linux', {}, '/h')).not.toBe(defaultBrowseDir('/b/data', 'linux', {}, '/h'));
+    expect(new LibraryStore('/home/u/council/data').browseDir.startsWith('/home/u/council/data')).toBe(false);
+  });
+});
+
 describe('BrowseMirror', () => {
   let dataDir: string;
   let store: LibraryStore;
@@ -126,7 +141,7 @@ describe('BrowseMirror', () => {
 
   beforeEach(async () => {
     dataDir = await mkdtemp(path.join(os.tmpdir(), 'council-mirror-'));
-    store = new LibraryStore(dataDir);
+    store = new LibraryStore(dataDir, path.join(dataDir, 'cache', 'browse'));
     await store.init();
     parts.set('a'.repeat(20), [
       { label: 'p. 1', text: 'First page.' },
@@ -193,6 +208,26 @@ describe('BrowseMirror', () => {
     await mkdir(path.join(memo, 'inner'), { recursive: true });
     await mirror.update([sources[0]!], records, load);
     expect(await readFile(memo, 'utf8')).toContain('Just a memo.');
+  });
+
+  it('creates its folders owner-only and is regenerated after the cache was cleared', async () => {
+    const mirror = new BrowseMirror(store);
+    await mirror.update([sources[0]!], records, load);
+    expect((await stat(path.join(dataDir, 'cache'))).mode & 0o777).toBe(0o700);
+    expect((await stat(store.browseDir)).mode & 0o777).toBe(0o700);
+    expect((await stat(path.join(store.browseDir, 'My Docs'))).mode & 0o777).toBe(0o700);
+    await rm(path.join(dataDir, 'cache'), { recursive: true, force: true });
+    const res = await mirror.update([sources[0]!], records, load);
+    expect(res.written).toBe(3);
+    expect(await listAll(store.browseDir)).toEqual(['INDEX.md', 'My Docs/Sub/report.pdf.md', 'My Docs/memo.txt.md']);
+  });
+
+  it('removes an old mirror left inside the data directory', async () => {
+    const legacy = path.join(dataDir, 'library', 'browse', 'Old');
+    await mkdir(legacy, { recursive: true });
+    await writeFile(path.join(legacy, 'x.md'), 'old', { mode: 0o444 });
+    await new LibraryStore(dataDir, path.join(dataDir, 'cache', 'browse')).init();
+    expect(await readdir(path.join(dataDir, 'library'))).not.toContain('browse');
   });
 
   it('removes documents that leave the library, and survives a lost state file', async () => {

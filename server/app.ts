@@ -54,6 +54,8 @@ export interface AppOptions {
     autoSync?: boolean;
     spawner?: Spawner;
     dirs?: DirOptions;
+    /** Where the browse mirror goes (tests use a temporary folder instead of the user's cache). */
+    browseDir?: string;
   };
 }
 
@@ -129,6 +131,7 @@ export async function createApp(options: AppOptions): Promise<CouncilApp> {
     notionFetch: options.library?.notionFetch,
     notionSleep: options.library?.notionSleep,
     autoSync: options.library?.autoSync,
+    browseDir: options.library?.browseDir,
   });
   await library.init();
   const runs = new RunManager({

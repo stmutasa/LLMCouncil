@@ -292,23 +292,46 @@ export interface BrowseSupport {
   no: string[];
 }
 
-/** Which enabled members' providers can open the library themselves in browse mode. */
+/**
+ * Which enabled members' providers can open the library themselves in browse mode. The
+ * arbiter takes part too when the council has more than one member.
+ */
 export function browseSupport(settings: Settings, providers: ProviderInfo[]): BrowseSupport {
   const result: BrowseSupport = { yes: [], untested: [], no: [] };
-  for (const m of settings.members) {
-    if (!m.enabled) continue;
-    const browse = providers.find((p) => p.id === m.provider)?.browse ?? 'no';
-    result[browse].push(m.name);
-  }
+  const browseOf = (id: string) => providers.find((p) => p.id === id)?.browse ?? 'no';
+  const enabled = settings.members.filter((m) => m.enabled);
+  for (const m of enabled) result[browseOf(m.provider)].push(m.name);
+  if (enabled.length > 1) result[browseOf(settings.arbiter.provider)].push(`the arbiter (${settings.arbiter.name})`);
   return result;
 }
 
-export function browseNote(support: BrowseSupport): string {
+/**
+ * The composer's note on who opens files in browse mode. Untested CLIs open files only when the
+ * user allowed it (`browseUntested`); otherwise they get passages like any other model.
+ */
+export function browseNote(support: BrowseSupport, browseUntested: boolean): string {
+  const can = [...support.yes, ...(browseUntested ? support.untested.map((n) => `${n} (unverified)`) : [])];
+  const passages = [...(browseUntested ? [] : support.untested), ...support.no];
   const parts: string[] = [];
-  if (support.yes.length) parts.push(`Can open files: ${support.yes.join(', ')}.`);
-  if (support.untested.length) parts.push(`Untested: ${support.untested.join(', ')}.`);
-  if (support.no.length) parts.push(`Passages only: ${support.no.join(', ')}.`);
+  if (can.length) parts.push(`Can open files: ${can.join(', ')}.`);
+  if (passages.length) parts.push(`Passages only: ${passages.join(', ')}.`);
   return parts.join(' ');
+}
+
+/**
+ * Labels of the providers, used by any member or the arbiter, that can read files but have not
+ * been shown to stay inside the library folder ("ChatGPT", "Gemini"). Disabled members count:
+ * an @mention still brings them in.
+ */
+export function untestedBrowseProviders(settings: Settings, providers: ProviderInfo[]): string[] {
+  const ids = new Set([...settings.members.map((m) => m.provider), settings.arbiter.provider]);
+  return providers.filter((p) => ids.has(p.id) && p.browse === 'untested').map((p) => p.label);
+}
+
+/** "A", "A and B", "A, B and C". */
+export function joinNames(names: string[]): string {
+  if (names.length <= 1) return names.join('');
+  return `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
 }
 
 /** A document attached in the composer. */

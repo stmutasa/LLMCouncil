@@ -2,7 +2,7 @@ import { copyFile, mkdir, mkdtemp, readdir, readFile, rename, rm, symlink, trunc
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { defaultSettings } from '../../shared/defaults';
 import type { Settings } from '../../shared/types';
 import type { Extractor } from './extract/extractor';
@@ -51,6 +51,8 @@ function makeLibrary(opts: { notionFetch?: FetchFn } = {}): Library {
     notionFetch: opts.notionFetch,
     notionSleep: async () => undefined,
     autoSync: false,
+    cancelWaitMs: 300,
+    browseDir: path.join(dataDir, 'test-cache', 'browse'),
   });
   libraries.push(lib);
   return lib;
@@ -175,6 +177,32 @@ describe('folder sync', () => {
     }
   });
 
+  it('keeps the last good text when a changed file cannot be read this time, and tries again next time', async () => {
+    const lib = makeLibrary();
+    await lib.init();
+    await sync(lib);
+    const id = docIdFor('docs', 'Sub folder/notes.txt');
+    const before = lib.document(id)!;
+    await writeFile(path.join(docs, 'Sub folder', 'notes.txt'), 'new text that is half downloaded');
+    await utimes(path.join(docs, 'Sub folder', 'notes.txt'), new Date(), new Date(Date.now() + 5_000));
+    extractor.failing.add('notes.txt');
+    await sync(lib);
+    const stale = lib.document(id)!;
+    expect(stale.status).toBe('ok');
+    expect(stale.detail).toBe('The latest version could not be read (The file could not be read: simulated); the previous version is still used.');
+    expect(stale.chars).toBe(before.chars);
+    expect(stale.modifiedAt).toBe(before.modifiedAt);
+    expect((await lib.documentText(id)).text).toContain('Héllo wörld');
+    expect((await lib.search(['zurich'], { budgetChars: 5_000, sourceIds: ['docs'] })).some((f) => f.documentId === id)).toBe(true);
+
+    extractor.calls = [];
+    extractor.failing.clear();
+    await sync(lib);
+    expect(extractor.calls).toContain('notes.txt');
+    expect(lib.document(id)!.detail).toBe('');
+    expect((await lib.documentText(id)).text).toBe('new text that is half downloaded');
+  });
+
   it('re-reads documents written by an older extractor version', async () => {
     const lib = makeLibrary();
     await lib.init();
@@ -232,7 +260,7 @@ describe('folder sync', () => {
     await lib.updateMirror();
     expect(lib.documents({}).total).toBe(0);
     expect(await readdir(path.join(dataDir, 'library', 'text'))).toEqual([]);
-    expect(await readdir(path.join(dataDir, 'library', 'browse'))).toEqual(['INDEX.md']);
+    expect(await readdir(path.join(dataDir, 'test-cache', 'browse'))).toEqual(['INDEX.md']);
     const manifest = JSON.parse(await readFile(path.join(dataDir, 'library', 'manifest.json'), 'utf8'));
     expect(manifest.documents).toEqual([]);
     expect(manifest.sources).toEqual({});
@@ -352,6 +380,35 @@ describe('folder sync', () => {
     expect(s.sync.error).toBe('The check was cancelled before it finished.');
     expect(lib.documents({ status: 'ok,empty,error' }).total).toBe(2);
     expect(s.lastSyncedAt).toBeNull();
+  });
+
+  it('abandons a check stuck on the file system, so cancel and later checks are not blocked', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const lib = makeLibrary();
+    await lib.init();
+    let releaseStuck: () => void = () => undefined;
+    extractor.block = () =>
+      new Promise<void>((resolve) => {
+        releaseStuck = resolve;
+        extractor.block = null;
+      });
+    // The fake extractor ignores the abort signal, like a read blocked on a hung drive.
+    extractor.extract = (async (file: string, type: string, _signal?: AbortSignal, root?: string) =>
+      CountingExtractor.prototype.extract.call(extractor, file, type, undefined, root)) as CountingExtractor['extract'];
+    await lib.requestSync('docs');
+    for (let i = 0; i < 200 && extractor.calls.length === 0; i++) await new Promise((r) => setTimeout(r, 5));
+    const started = Date.now();
+    await lib.cancelSync('docs');
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(lib.syncing).toBe(false);
+    await sync(lib);
+    const after = lib.documents({}).total;
+    expect(after).toBe(11);
+    releaseStuck();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(lib.documents({}).total).toBe(after);
+    expect((await status(lib)).sync.error).toBeNull();
+    vi.restoreAllMocks();
   });
 
   it('queues a second sync while one runs', async () => {
@@ -486,6 +543,21 @@ describe('Notion sync', () => {
     // p3 is unchanged and not fetched again; p2 failed before and is retried.
     expect(world.calls().sort()).toEqual(['p1', 'p2']);
     expect((await lib.documentText(docIdFor('notion', 'p1'))).text).toBe('# Roadmap\n\nShip it later.');
+
+    // An edited page that fails to load keeps its last good text.
+    world.reset();
+    world.pages.get('p1')!.edited = '2026-03-01T00:00:00Z';
+    world.pages.get('p1')!.markdown = new Error('Service temporarily unavailable.');
+    await sync(lib, 'notion');
+    expect(lib.document(docIdFor('notion', 'p1'))).toMatchObject({
+      status: 'ok',
+      modifiedAt: '2026-02-01T00:00:00Z',
+      detail: 'The latest version could not be read (Service temporarily unavailable); the previous version is still used.',
+    });
+    expect((await lib.documentText(docIdFor('notion', 'p1'))).text).toBe('# Roadmap\n\nShip it later.');
+    world.pages.get('p1')!.markdown = '# Roadmap\n\nShipped.';
+    await sync(lib, 'notion');
+    expect((await lib.documentText(docIdFor('notion', 'p1'))).text).toBe('# Roadmap\n\nShipped.');
 
     world.reset();
     world.pages.delete('p3');

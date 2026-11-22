@@ -5,7 +5,7 @@ import { api, errorMessage } from '../../api';
 import { useNow } from '../../hooks/useNow';
 import { LIMITS } from '../../../../shared/defaults';
 import { count } from '../../lib/format';
-import { approxTokens, groupExcerpts, syncAnnouncements, whereText } from '../../lib/library';
+import { approxTokens, groupExcerpts, joinNames, syncAnnouncements, untestedBrowseProviders, whereText } from '../../lib/library';
 import { errorKey } from '../../lib/settings';
 import { useStore } from '../../store';
 import { Spinner } from '../icons';
@@ -129,6 +129,7 @@ function UsageSection({ draft, update, errors }: TabProps) {
   const providers = useStore((s) => s.providers.list);
   const lib = draft.library;
   const planner = lib.planner;
+  const untested = providers ? untestedBrowseProviders(draft, providers) : [];
   const plannerProvider = providers?.find((p) => p.id === planner.provider);
   const setLib = (patch: Partial<typeof lib>) => update((d) => ({ ...d, library: { ...d.library, ...patch } }));
   const setPlanner = (patch: Partial<typeof planner>) =>
@@ -202,6 +203,16 @@ function UsageSection({ draft, update, errors }: TabProps) {
               </Field>
             </div>
           </div>
+          {untested.length > 0 && (
+            <div className="span-2">
+              <Switch
+                checked={lib.browseUntested}
+                onChange={(browseUntested) => setLib({ browseUntested })}
+                label={`Also let ${joinNames(untested)} open the library`}
+                description={`Applies when models may browse. ${joinNames(untested)} can read files, but ${untested.length === 1 ? 'its command-line tool has' : 'their command-line tools have'} not been shown to stay inside the library folder: a document with hidden instructions could lead ${untested.length === 1 ? 'it' : 'them'} to read other files on this computer. Claude has been checked and cannot read outside the folder. Off: ${untested.length === 1 ? 'it gets' : 'they get'} passages only.`}
+              />
+            </div>
+          )}
           <Field
             label="Check for changes every (minutes)"
             hint="0 checks only when you click Check now. Otherwise 5 to 1,440."

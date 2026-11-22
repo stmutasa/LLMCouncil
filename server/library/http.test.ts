@@ -161,6 +161,7 @@ beforeAll(async () => {
       autoSync: false,
       spawner: (command, args) => void spawned.push({ command, args }),
       dirs: { home, platform: 'linux' },
+      browseDir: path.join(dir, 'test-cache', 'browse'),
     },
   });
   server = council.app.listen(0, '127.0.0.1');
@@ -383,9 +384,9 @@ describe('turns that use the library', () => {
     const turn = await waitForTurn(res.conversation.id, res.turn.id);
     expect(turn.library!.browsableDocuments).toBe(3);
     expect(turn.finalText).toContain('INDEX.md lists 3 documents');
-    const index = await readFile(path.join(dir, 'library', 'browse', 'INDEX.md'), 'utf8');
+    const index = await readFile(path.join(dir, 'test-cache', 'browse', 'INDEX.md'), 'utf8');
     expect(index).toContain('- Work/Board/deck.pptx.md — deck.pptx (Work, 11 slides,');
-    expect((await stat(path.join(dir, 'library', 'browse', 'Work', 'report.pdf.md'))).mode & 0o222).toBe(0);
+    expect((await stat(path.join(dir, 'test-cache', 'browse', 'Work', 'report.pdf.md'))).mode & 0o222).toBe(0);
     expect((await put((s) => void (s.library.mode = 'search'))).status).toBe(200);
   });
 

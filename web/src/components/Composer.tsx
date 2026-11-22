@@ -230,7 +230,7 @@ function LibraryMenu({ settings }: { settings: Settings }) {
 
   const label = !hasSources ? 'Library' : allOff ? 'Library: sources off' : reading ? 'Library: reading…' : documents === 0 ? 'Library: empty' : `Library: ${mode}`;
   const active = !empty && mode !== 'off';
-  const note = providers ? browseNote(browseSupport(settings, providers)) : '';
+  const note = providers ? browseNote(browseSupport(settings, providers), settings.library.browseUntested) : '';
   const setMode = (next: LibraryMode) => {
     if (next === mode) return;
     changeSettings((s) => ({ ...s, library: { ...s.library, mode: next } }), 'the library setting');

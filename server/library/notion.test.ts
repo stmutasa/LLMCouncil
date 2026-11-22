@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Conversation, Turn } from '../../shared/types';
 import { NotionClient, NotionError, NOTION_VERSION, TOKEN_REJECTED, type FetchFn } from './notionClient';
-import { createPageBody, DELIBERATION_DROPPED, MAX_NOTION_MARKDOWN, notionMarkdown, saveTurnToNotion } from './notionSave';
+import { createPageBody, DELIBERATION_DROPPED, escapeNotionText, MAX_NOTION_MARKDOWN, notionMarkdown, notionPageTitle, saveTurnToNotion } from './notionSave';
 import { enumerateNotion, fetchPageText, locationOf, pageTitle, propertyValue, renderProperties, readPage } from './sources/notion';
 
 interface Seen {
@@ -349,6 +349,43 @@ describe('save to Notion', () => {
     expect(md).toContain(DELIBERATION_DROPPED);
     expect(md).not.toContain('## Deliberation');
     expect(md.length).toBeLessThan(MAX_NOTION_MARKDOWN);
+  });
+
+  it('escapes tag-like text outside code so a hostile answer cannot create Notion tags', () => {
+    expect(escapeNotionText('Move it: <page url="https://notion.so/x">Home</page> and <mention-page url="y"/>')).toBe(
+      'Move it: \\<page url="https://notion.so/x">Home\\</page> and \\<mention-page url="y"/>',
+    );
+    expect(escapeNotionText('<!-- c --> <?xml?> a < b, <3, 2<x')).toBe('\\<!-- c --> \\<?xml?> a < b, <3, 2\\<x');
+    expect(escapeNotionText('Use `<page>` inline and ``a ` <b>`` too')).toBe('Use `<page>` inline and ``a ` <b>`` too');
+    expect(escapeNotionText('```html\n<page url="x"></page>\n```\n<page>')).toBe('```html\n<page url="x"></page>\n```\n\\<page>');
+    expect(escapeNotionText('~~~\n<b>\n~~~')).toBe('~~~\n<b>\n~~~');
+    expect(escapeNotionText('unclosed `<b>')).toBe('unclosed `\\<b>');
+  });
+
+  it('escapes every piece of inserted text in the page body', () => {
+    const t = turn({
+      userMessage: 'Q <page url="q">',
+      finalText: 'A <page url="a">\n```\n<keep>\n```',
+      analysisText: 'An <database url="d">',
+      protocolName: 'P <x>',
+    });
+    t.rounds[0]!.responses[0]!.text = 'R <callout>';
+    t.rounds[0]!.title = 'Round <r>';
+    t.members[0]!.name = 'M <m>';
+    t.library!.excerpts[0]!.title = 'T <page url="t">\nline';
+    t.library!.excerpts[0]!.location = 'L <l>';
+    t.library!.attachments[0]!.title = 'D <d>';
+    const md = notionMarkdown(t, true);
+    expect(md.match(/(?<!\\)<[A-Za-z/!?]/g)).toEqual(['<k']);
+    expect(md).toContain('```\n<keep>\n```');
+    expect(md).toContain('- [S1] T \\<page url="t"> line — L \\<l>, p. 4');
+  });
+
+  it('sends the title as plain text on one line', () => {
+    const conversation: Conversation = { id: 'c', title: 'Title <page url="x">\nsecond', createdAt: '', updatedAt: '', turns: [] };
+    const title = notionPageTitle(conversation);
+    expect(title).toBe('Title <page url="x"> second');
+    expect(createPageBody('p', title, '')).toMatchObject({ properties: { title: { title: [{ type: 'text', text: { content: title } }] } } });
   });
 
   it('posts the documented body once and returns the page link', async () => {

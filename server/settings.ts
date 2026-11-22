@@ -113,6 +113,7 @@ const librarySchema = z.object({
   excerptChars: z.number().int(),
   attachmentChars: z.number().int(),
   planner: z.object({ enabled: z.boolean(), provider: z.string(), model: z.string(), effort: z.string() }),
+  browseUntested: z.boolean(),
   autoSyncMinutes: z.number().int(),
   notionSaveParent: z.object({ id: z.string(), title: z.string() }).nullable(),
 }) satisfies z.ZodType<LibrarySettings>;
