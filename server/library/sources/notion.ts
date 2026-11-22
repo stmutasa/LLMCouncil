@@ -1,3 +1,4 @@
+import { joinLines } from '../extract/normalize';
 import { NotionError, type NotionClient } from '../notionClient';
 
 /** Notion hands back partial objects in places; every field is read defensively. */
@@ -149,7 +150,7 @@ export function renderProperties(properties: Json): string {
   for (const [name, prop] of Object.entries(properties)) {
     if (isObject(prop) && prop.type === 'title') continue;
     const value = propertyValue(prop).trim();
-    if (value) lines.push(`${name}: ${value.replace(/\s*\n\s*/g, ' ')}`);
+    if (value) lines.push(`${name}: ${joinLines(value)}`);
   }
   return lines.join('\n');
 }

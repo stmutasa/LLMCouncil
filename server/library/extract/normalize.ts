@@ -3,16 +3,37 @@ import { MAX_DOCUMENT_CHARS, type ExtractResult, type Part } from '../types';
 // Control characters other than tab and newline (carriage returns are converted before this).
 const CONTROL_RE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g;
 
-/** NFC, \n line ends, no control characters, at most two blank lines in a row, no trailing spaces. */
+/**
+ * NFC, \n line ends, no control characters, at most two blank lines in a row, no trailing
+ * spaces. Every step is a single linear pass: a regex anchored at a line end backtracks over
+ * each run of spaces once per position, which turns a file of long space runs into minutes.
+ */
 export function normalizeText(text: string): string {
-  return text
-    .normalize('NFC')
-    .replace(/\r\n?/g, '\n')
-    .replace(CONTROL_RE, '')
-    .replace(/[ \t ]+$/gm, '')
-    .replace(/\n{4,}/g, '\n\n\n')
-    .replace(/^\n+/, '')
-    .replace(/\s+$/, '');
+  const lines = text.normalize('NFC').replace(/\r\n?/g, '\n').replace(CONTROL_RE, '').split('\n');
+  const out: string[] = [];
+  let blank = 0;
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+    if (line === '') {
+      // Leading blank lines are dropped; inside the text at most two in a row are kept.
+      if (out.length === 0) continue;
+      blank++;
+      if (blank > 2) continue;
+    } else {
+      blank = 0;
+    }
+    out.push(line);
+  }
+  return out.join('\n').trimEnd();
+}
+
+/** The lines of a cell or property value joined by single spaces, in one linear pass. */
+export function joinLines(value: string): string {
+  return value
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l !== '')
+    .join(' ');
 }
 
 export const CUT_DETAIL = `Only the first ${MAX_DOCUMENT_CHARS.toLocaleString('en-US')} characters were kept; the document is longer.`;

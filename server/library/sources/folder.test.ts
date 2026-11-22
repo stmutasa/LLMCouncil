@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -65,13 +65,38 @@ describe('scanFolder', () => {
       if (dir === which) throw Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' });
       return readdir(dir, { withFileTypes: true });
     };
-    const scan = await scanFolder(root, { readdir: denied(path.join(root, 'sub')) });
+    const scan = await scanFolder(root, { fs: { readdir: denied(path.join(root, 'sub')) } });
     expect(scan.readable).toBe(true);
     expect(scan.unreadableDirs).toEqual(['sub']);
     expect(scan.files.map((f) => f.rel)).toEqual(['B.docx', 'a.pdf', 'noext']);
-    const top = await scanFolder(root, { readdir: denied(root) });
+    const top = await scanFolder(root, { fs: { readdir: denied(root) } });
     expect(top.readable).toBe(false);
     expect(top.error).toMatch(/permission denied/);
+  });
+
+  it('gives up on a call that never answers, and keeps what it could not check', async () => {
+    const never = () => new Promise<never>(() => undefined);
+    const hungDir = await scanFolder(root, {
+      callTimeoutMs: 100,
+      fs: { readdir: (dir) => (dir === path.join(root, 'sub') ? never() : readdir(dir, { withFileTypes: true })) },
+    });
+    expect(hungDir.readable).toBe(true);
+    expect(hungDir.unreadableDirs).toEqual(['sub']);
+    const hungStat = await scanFolder(root, { callTimeoutMs: 100, fs: { lstat: (f) => (f.endsWith('a.pdf') ? never() : lstat(f)) } });
+    expect(hungStat.files.map((f) => f.rel)).not.toContain('a.pdf');
+    expect(hungStat.unreadableDirs).toEqual(['a.pdf']);
+    const hungRoot = await scanFolder(root, { callTimeoutMs: 100, fs: { stat: never } });
+    expect(hungRoot.readable).toBe(false);
+    expect(hungRoot.error).toMatch(/did not respond/);
+  });
+
+  it('stops promptly when cancelled, even while a call hangs', async () => {
+    const ctl = new AbortController();
+    const started = Date.now();
+    const pending = scanFolder(root, { signal: ctl.signal, fs: { readdir: () => new Promise<never>(() => undefined) } });
+    setTimeout(() => ctl.abort(), 50);
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    expect(Date.now() - started).toBeLessThan(2_000);
   });
 
   it('knows which names to skip', () => {

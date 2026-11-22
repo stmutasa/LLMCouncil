@@ -5,6 +5,7 @@ import { count } from './format';
 import {
   approxTokens,
   attachmentBudget,
+  attachedSize,
   attachmentsFromTurn,
   breadcrumbs,
   browseNote,
@@ -302,7 +303,16 @@ describe('attachments', () => {
     ]);
     expect(docs.map((d) => d.id)).toEqual(['doc1', 'doc2']);
     expect(docs[0]).toMatchObject({ title: 'doc1.docx', chars: 500, atLeast: true, problem: '' });
-    expect(docs[1]!.problem).toContain('Not included');
+    // Left out for lack of budget: not a problem of the document; its size is unknown.
+    expect(docs[1]).toMatchObject({ problem: '', atLeast: true });
+    const gone = attachmentsFromTurn([attachment('D1', 'x', { title: 'Unknown document', chars: 0, problem: 'This document is no longer in the library.' })]);
+    expect(gone[0]).toMatchObject({ problem: 'This document is no longer in the library.', atLeast: false });
+  });
+
+  it('describes sizes as far as they are known', () => {
+    expect(attachedSize({ chars: 48_000, atLeast: false })).toBe('48k characters');
+    expect(attachedSize({ chars: 4000, atLeast: true })).toBe('at least 4k characters');
+    expect(attachedSize({ chars: 0, atLeast: true })).toBe('size unknown');
   });
 
   it('shares the budget in order, cutting the document that does not fit', () => {

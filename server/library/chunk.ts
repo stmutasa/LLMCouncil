@@ -22,6 +22,13 @@ function charAt(text: string, i: number): string {
   return text[i] ?? '';
 }
 
+/** ASCII is answered without a regex; this is called for every character of an unbreakable run. */
+function isWordChar(ch: string): boolean {
+  const c = ch.charCodeAt(0);
+  if (c < 0x80) return (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
+  return WORD_CHAR.test(ch);
+}
+
 /** Whether a chunk may end at `i` without cutting a word (or a surrogate pair) in two. */
 export function canBreakAt(text: string, i: number): boolean {
   if (i <= 0 || i >= text.length) return true;
@@ -29,26 +36,34 @@ export function canBreakAt(text: string, i: number): boolean {
   if (code >= 0xdc00 && code <= 0xdfff) return false;
   const a = charBefore(text, i);
   const b = charAt(text, i);
-  if (!WORD_CHAR.test(a) || !WORD_CHAR.test(b)) return true;
-  return UNSPACED.test(a) && UNSPACED.test(b);
+  if (!isWordChar(a) || !isWordChar(b)) return true;
+  return a.charCodeAt(0) >= 0x80 && UNSPACED.test(a) && UNSPACED.test(b);
 }
 
 const PARAGRAPH = /\n[ \t]*\n\s*/g;
-const SENTENCE = /[.!?。！？](?:["'”’)\]]*)\s+/g;
+// Western sentence ends need a following space; CJK ones (。！？) do not.
+const SENTENCE = /[.!?]["'”’)\]]*\s+|[。！？][」』）"”’]*\s*/g;
 const SPACE = /\s+/g;
 
-/** The candidate closest to `target` among the matches' end positions within [lo, hi]. */
-function nearestBreak(text: string, re: RegExp, lo: number, hi: number, target: number): number | null {
-  re.lastIndex = lo;
+/**
+ * The break closest to `goal` among the end positions of `re`'s matches inside the window
+ * [lo, hi]. Only the window is searched (a regex left to scan to the end of a long text for every
+ * chunk makes chunking quadratic). Positions are absolute.
+ */
+function nearestBreak(text: string, re: RegExp, from: number, lo: number, hi: number, goal: number): number | null {
+  const window = text.slice(from, hi + 1);
+  re.lastIndex = 0;
   let best: number | null = null;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    const at = m.index + m[0].length;
-    if (m.index > hi) break;
-    if (at >= lo && at <= hi && at < text.length) {
-      if (best === null || Math.abs(at - target) < Math.abs(best - target)) best = at;
+  while ((m = re.exec(window)) !== null) {
+    if (m[0].length === 0) {
+      re.lastIndex++;
+      continue;
     }
-    if (m[0].length === 0) re.lastIndex++;
+    const at = from + m.index + m[0].length;
+    if (at >= lo && at <= hi && at < text.length && (best === null || Math.abs(at - goal) < Math.abs(best - goal))) {
+      best = at;
+    }
   }
   return best;
 }
@@ -57,7 +72,7 @@ function nearestBreak(text: string, re: RegExp, lo: number, hi: number, target: 
  * Splits text into chunks of about `target` characters, breaking at a paragraph boundary when
  * there is one nearby, otherwise at a sentence end, then at whitespace, then between characters
  * of a script written without spaces or at punctuation. A word is never cut: a chunk that has no
- * permitted break nearby grows until the next one.
+ * permitted break nearby grows until the next one. Linear in the length of the text.
  */
 export function chunkText(text: string, target = CHUNK_TARGET): ChunkRange[] {
   const out: ChunkRange[] = [];
@@ -73,9 +88,9 @@ export function chunkText(text: string, target = CHUNK_TARGET): ChunkRange[] {
     const hi = pos + max;
     const goal = pos + target;
     let at =
-      nearestBreak(text, PARAGRAPH, lo, hi, goal) ??
-      nearestBreak(text, SENTENCE, lo, hi, goal) ??
-      nearestBreak(text, SPACE, lo, hi, goal);
+      nearestBreak(text, PARAGRAPH, pos, lo, hi, goal) ??
+      nearestBreak(text, SENTENCE, pos, lo, hi, goal) ??
+      nearestBreak(text, SPACE, pos, lo, hi, goal);
     if (at === null) {
       for (let d = 0; d <= max - min && at === null; d++) {
         if (goal - d >= lo && canBreakAt(text, goal - d)) at = goal - d;

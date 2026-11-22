@@ -60,6 +60,8 @@ export interface LibraryOptions {
   /** Syncs at start (after a short delay) and every autoSyncMinutes. Tests turn it off. */
   autoSync?: boolean;
   startDelayMs?: number;
+  /** How long a cancel waits for a sync to stop before abandoning it (tests shorten it). */
+  cancelWaitMs?: number;
 }
 
 function enabledSourceIds(settings: Settings): string[] {
@@ -129,6 +131,7 @@ export class Library {
     this.queue = new SyncQueue(
       (id, signal, progress) => this.runSync(id, signal, progress),
       () => this.extractor.stop(),
+      options.cancelWaitMs,
     );
   }
 
@@ -151,8 +154,8 @@ export class Library {
     this.closed = true;
     if (this.autoTimer) clearTimeout(this.autoTimer);
     this.autoTimer = null;
-    // A sync stuck on an unresponsive drive must not keep the server from stopping.
-    await Promise.race([this.queue.shutdown(), new Promise((r) => setTimeout(r, 3_000).unref())]);
+    // A sync stuck on an unresponsive drive is abandoned after a few seconds (SyncQueue).
+    await this.queue.shutdown();
     this.extractor.stop();
     await this.persistChain.catch(() => undefined);
     await this.mirrorChain.catch(() => undefined);
@@ -347,6 +350,12 @@ export class Library {
   private async runSync(sourceId: string, signal: AbortSignal, progress: Progress): Promise<void> {
     const source = this.settings.library.sources.find((s) => s.id === sourceId);
     if (!source) return;
+    if (source.kind === 'folder') {
+      // Recorded before reading starts, so a change of folder while this runs is noticed by
+      // reconcile, which then cancels this job and starts one for the new folder.
+      const before = this.sourceState[sourceId];
+      this.sourceState[sourceId] = { lastSyncedAt: before?.lastSyncedAt ?? null, error: before?.error ?? null, path: source.path };
+    }
     const sizeBefore = this.records.size;
     let changed = false;
     let error: string | null = null;
@@ -366,6 +375,8 @@ export class Library {
       else if (err instanceof SyncStopped) error = err.message;
       else error = `The check stopped because of an unexpected error: ${(err as Error).message}`;
     }
+    // Given up on by the queue (it hung after a cancel): a newer job may own the source now.
+    if (progress.abandoned) return;
     // A source removed (or pointed at another folder) while it was being read leaves nothing behind.
     const now = this.settings.library.sources.find((s) => s.id === sourceId);
     if (!now || (now.kind === 'folder' && source.kind === 'folder' && now.path !== source.path)) {

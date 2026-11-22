@@ -595,6 +595,7 @@ class TurnRunner {
           attachmentIds: this.input.plan.attachmentIds,
           signal: this.internal.signal,
           emit: (event) => this.emit(event),
+          rng: this.input.rng,
         });
       } catch (err) {
         if (this.stopped) return this.endStopped();

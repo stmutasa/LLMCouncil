@@ -1521,6 +1521,16 @@ button.crumb:hover {
   }
   .doc-row {
     flex-wrap: wrap;
+    row-gap: var(--space-1);
+  }
+  .doc-row-main {
+    flex-basis: 100%;
+  }
+  .browser-filters .search-field {
+    flex-basis: 100%;
+  }
+  .browser-filters .select {
+    flex: 1 1 8rem;
   }
   .doc-row-actions {
     max-width: none;

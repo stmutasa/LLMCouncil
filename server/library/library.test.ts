@@ -6,7 +6,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { defaultSettings } from '../../shared/defaults';
 import type { Settings } from '../../shared/types';
 import type { Extractor } from './extract/extractor';
-import { extractFile } from './extract/formats';
+import { extractFile, LINK_OUTSIDE_DETAIL } from './extract/formats';
+import { CUT_DETAIL } from './extract/normalize';
 import { Library } from './library';
 import type { FetchFn } from './notionClient';
 import { docIdFor } from './store';
@@ -20,12 +21,12 @@ class CountingExtractor implements Extractor {
   failing = new Set<string>();
   stops = 0;
   block: ((file: string) => Promise<void>) | null = null;
-  async extract(file: string, type: string, signal?: AbortSignal): Promise<ExtractResult> {
+  async extract(file: string, type: string, signal?: AbortSignal, root?: string): Promise<ExtractResult> {
     this.calls.push(path.basename(file));
     if (this.block) await this.block(file);
     if (signal?.aborted) throw Object.assign(new Error('aborted'), { name: 'AbortError' });
     if (this.failing.has(path.basename(file))) return { status: 'error', detail: 'The file could not be read: simulated' };
-    return extractFile(file, type);
+    return extractFile(file, type, root);
   }
   stop() {
     this.stops++;
@@ -150,6 +151,30 @@ describe('folder sync', () => {
     expect(text.text).toBe('changed text about turbines');
   });
 
+  it('does not read a file that was replaced by a link to outside the folder after the scan', async () => {
+    const outside = await mkdtemp(path.join(os.tmpdir(), 'council-lib-outside-'));
+    try {
+      await writeFile(path.join(outside, 'secret.txt'), 'outside secret contents');
+      const lib = makeLibrary();
+      await lib.init();
+      const target = path.join(docs, 'Sub folder', 'notes.txt');
+      extractor.block = async (file) => {
+        if (file.endsWith('deck.pptx')) {
+          // Swapped between the scan and the read.
+          await rm(target);
+          await symlink(path.join(outside, 'secret.txt'), target);
+        }
+      };
+      await sync(lib);
+      const doc = lib.document(docIdFor('docs', 'Sub folder/notes.txt'))!;
+      expect(doc).toMatchObject({ status: 'error', detail: LINK_OUTSIDE_DETAIL });
+      const texts = await readdir(path.join(dataDir, 'library', 'text'));
+      for (const t of texts) expect(await readFile(path.join(dataDir, 'library', 'text', t), 'utf8')).not.toContain('outside secret');
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
   it('re-reads documents written by an older extractor version', async () => {
     const lib = makeLibrary();
     await lib.init();
@@ -255,6 +280,37 @@ describe('folder sync', () => {
       await expect(lib.requestSync('docs')).rejects.toMatchObject({ status: 409 });
     } finally {
       await rm(link, { force: true });
+    }
+  });
+
+  it('follows a change of folder made while the first check of a new source is running', async () => {
+    const other = await mkdtemp(path.join(os.tmpdir(), 'council-lib-second-'));
+    try {
+      await writeFile(path.join(other, 'second.txt'), 'second folder');
+      settings.library.sources = [];
+      const lib = makeLibrary();
+      await lib.init();
+      let release: () => void = () => undefined;
+      extractor.block = () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+          extractor.block = null;
+        });
+      let previous = structuredClone(settings);
+      settings.library.sources = [{ id: 'docs', kind: 'folder', name: 'New', enabled: true, path: docs }];
+      await lib.reconcile(settings, previous);
+      for (let i = 0; i < 200 && extractor.calls.length === 0; i++) await new Promise((r) => setTimeout(r, 5));
+      expect(extractor.calls.length).toBe(1);
+      previous = structuredClone(settings);
+      settings.library.sources = [{ id: 'docs', kind: 'folder', name: 'New', enabled: true, path: other }];
+      const applied = lib.reconcile(settings, previous);
+      release();
+      await applied;
+      await idle(lib);
+      expect(lib.documents({}).documents.map((d) => d.title)).toEqual(['second.txt']);
+      expect((await status(lib)).lastSyncedAt).not.toBeNull();
+    } finally {
+      await rm(other, { recursive: true, force: true });
     }
   });
 
@@ -443,6 +499,20 @@ describe('Notion sync', () => {
     await sync(lib, 'notion');
     expect(lib.document(docIdFor('notion', 'p3'))).toBeNull();
     expect((await status(lib, 'notion')).sync.error).toBeNull();
+  });
+
+  it('caps a very long page before processing it', async () => {
+    const world = notionWorld();
+    world.pages.set('big', { title: 'Huge', edited: '2026-01-01T00:00:00Z', markdown: `${'a '.repeat(2_600_000)}tail` });
+    settings.library.sources = [{ id: 'notion', kind: 'notion', name: 'Notion', enabled: true }];
+    const lib = makeLibrary({ notionFetch: world.fetch });
+    await lib.init();
+    await lib.connectNotion('secret_abc');
+    await idle(lib);
+    const doc = lib.document(docIdFor('notion', 'big'))!;
+    expect(doc.status).toBe('ok');
+    expect(doc.chars).toBeLessThanOrEqual(5_000_000);
+    expect(doc.detail).toBe(CUT_DETAIL);
   });
 
   it('adds a Notion source when a token is connected and never stores the token in settings', async () => {

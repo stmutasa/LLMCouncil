@@ -249,12 +249,18 @@ describe('library phase', () => {
     expect(members).toHaveLength(3);
     for (const c of members) {
       expect(c.prompt).toContain("## Source material from the user's library");
-      expect(c.prompt).toContain('<source id="S1" title="');
+      expect(c.prompt).toMatch(/<source-[a-z0-9]{6} id="S1" title="/);
       expect(c.browseDir).toBeUndefined();
     }
     const arbiter = calls.find((c) => c.prompt.includes('the arbiter of a council'))!;
     expect(arbiter.prompt).toContain("keep the citations ([S1], [D1] or file paths)");
-    expect(arbiter.prompt).toContain('<source id="S1"');
+    expect(arbiter.prompt).toMatch(/<source-[a-z0-9]{6} id="S1"/);
+    // One code for every call of the turn, and it is never stored or sent to the browser.
+    const codes = new Set(calls.filter((c) => !c.prompt.startsWith('You are preparing')).map((c) => /<source-([a-z0-9]{6}) /.exec(c.prompt)?.[1]));
+    expect(codes.size).toBe(1);
+    const code = [...codes][0]!;
+    expect(JSON.stringify(events)).not.toContain(`source-${code}`);
+    expect(JSON.stringify(events)).not.toContain(code);
     // The mock cites the first passage, so citations reach the answer.
     expect(turn.finalText).toContain('[S1]');
   });
@@ -412,7 +418,7 @@ describe('library phase', () => {
     const { turn, calls } = await runOne({ library: lib, message: '@Claude turbine facts' });
     expect(turn.mode).toBe('direct');
     expect(turn.library!.excerpts.length).toBeGreaterThan(0);
-    expect(calls.find((c) => c.prompt.includes('## Your task'))!.prompt).toContain('<source id="S1"');
+    expect(calls.find((c) => c.prompt.includes('## Your task'))!.prompt).toMatch(/<source-[a-z0-9]{6} id="S1"/);
   });
 
   it('gives the mirror only to providers that can browse', async () => {

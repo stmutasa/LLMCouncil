@@ -32,7 +32,7 @@ const allResponses: string[] = [];
 let notionMode: 'ok' | 'reject' = 'ok';
 const created: unknown[] = [];
 
-const extractor: Extractor = { extract: (file, type) => extractFile(file, type), stop: () => undefined };
+const extractor: Extractor = { extract: (file, type, _signal, root) => extractFile(file, type, root), stop: () => undefined };
 
 const notionFetch: FetchFn = async (url, init) => {
   const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });

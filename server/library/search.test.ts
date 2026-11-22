@@ -50,6 +50,32 @@ describe('chunking', () => {
     for (const c of chunkText(emoji)) expect(emoji.charCodeAt(c.start) >= 0xdc00 && emoji.charCodeAt(c.start) <= 0xdfff).toBe(false);
   });
 
+  it('is linear: five million characters without spaces, of Japanese, or of CSV lines chunk quickly', () => {
+    const cases = [
+      'x'.repeat(5_000_000),
+      '日本語の文章です。'.repeat(560_000),
+      'a,b,c,1,2,3,hello,world\n'.repeat(210_000),
+      '日本語'.repeat(340_000),
+    ];
+    for (const text of cases) {
+      const started = Date.now();
+      const chunks = chunkText(text);
+      expect(Date.now() - started, text.slice(0, 10)).toBeLessThan(1_500);
+      expect(chunks[0]!.start).toBe(0);
+      expect(chunks[chunks.length - 1]!.end).toBe(text.length);
+      for (let i = 1; i < chunks.length; i++) {
+        expect(chunks[i]!.start).toBe(chunks[i - 1]!.end);
+        expect(canBreakAt(text, chunks[i]!.start)).toBe(true);
+      }
+      if (text[0] !== 'x') for (const c of chunks) expect(c.end - c.start).toBeLessThanOrEqual(1_500);
+    }
+    // A run with no permitted break is never cut.
+    expect(chunkText('x'.repeat(5_000_000))).toHaveLength(1);
+    // Japanese sentences end at 。 even without a following space.
+    const jp = '日本語の文章です。'.repeat(500);
+    for (const c of chunkText(jp).slice(0, -1)) expect(jp[c.end - 1]).toBe('。');
+  });
+
   it('returns no chunks for empty text and one for short text', () => {
     expect(chunkText('')).toEqual([]);
     expect(chunkText('short')).toEqual([{ start: 0, end: 5 }]);
@@ -190,6 +216,24 @@ describe('index and search', () => {
     // Same length, different words: still recognised as changed.
     const same = async () => [{ label: '', text: 'alpha gamma beta' }];
     expect(await searchIndex(index, ['alpha'], { budgetChars: 10_000, sourceIds: ['src'] }, same)).toEqual([]);
+  });
+
+  it('yields to the event loop inside one very large document too', async () => {
+    const big = doc('big', 'Big', ['word '.repeat(1_000_000)]);
+    let ticks = 0;
+    const timer = setInterval(() => ticks++, 1);
+    let longest = 0;
+    let last = Date.now();
+    const probe = setInterval(() => {
+      const now = Date.now();
+      longest = Math.max(longest, now - last);
+      last = now;
+    }, 1);
+    await LibraryIndex.build([big]);
+    clearInterval(timer);
+    clearInterval(probe);
+    expect(ticks).toBeGreaterThan(5);
+    expect(longest).toBeLessThan(500);
   });
 
   it('yields to the event loop while building', async () => {

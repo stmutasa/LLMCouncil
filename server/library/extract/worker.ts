@@ -11,6 +11,8 @@ export interface WorkerRequest {
   id: number;
   file: string;
   type: string;
+  /** The source folder; the file is read only if it is really inside it. */
+  root?: string;
 }
 
 export interface WorkerResponse {
@@ -28,7 +30,7 @@ process.on('message', (message: WorkerRequest) => {
       if (name.includes('__hang__')) for (;;);
       if (name.includes('__crash__')) process.exit(7);
     }
-    const result = await extractFile(message.file, message.type);
+    const result = await extractFile(message.file, message.type, message.root);
     const response: WorkerResponse = { id: message.id, result };
     process.send?.(response);
   })();

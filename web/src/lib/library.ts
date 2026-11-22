@@ -325,6 +325,15 @@ export interface AttachedDocument {
   problem: string;
 }
 
+/** How the server begins the problem of an attachment that did not fit the budget. */
+const BUDGET_PROBLEM = 'Not included: the attachment budget';
+
+/** Size of an attached document as far as it is known: "48k characters", "at least 4k characters", "size unknown". */
+export function attachedSize(doc: Pick<AttachedDocument, 'chars' | 'atLeast'>): string {
+  if (doc.atLeast) return doc.chars > 0 ? `at least ${formatChars(doc.chars)}` : 'size unknown';
+  return formatChars(doc.chars);
+}
+
 /** The composer's starting attachments for a conversation: the last turn's, in the same order. */
 export function attachmentsFromTurn(attachments: TurnAttachment[]): AttachedDocument[] {
   const seen = new Set<string>();
@@ -332,14 +341,18 @@ export function attachmentsFromTurn(attachments: TurnAttachment[]): AttachedDocu
   for (const a of attachments) {
     if (seen.has(a.documentId)) continue;
     seen.add(a.documentId);
+    // A document left out only for lack of budget is fine in itself: the budget is worked out
+    // again for the next question. Its size is unknown (nothing of it was sent), as is the full
+    // size of one that was cut.
+    const budgetOnly = a.problem.startsWith(BUDGET_PROBLEM);
     out.push({
       id: a.documentId,
       title: a.title,
       location: a.location,
       sourceName: a.sourceName,
       chars: a.chars,
-      atLeast: a.truncated,
-      problem: a.problem,
+      atLeast: a.truncated || budgetOnly,
+      problem: budgetOnly ? '' : a.problem,
     });
   }
   return out;

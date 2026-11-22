@@ -16,7 +16,16 @@ function itemId(turnId: string, citationId: string): string {
  * documents and passages of one turn. Collapsed by default; a citation chip opens it at the
  * cited item.
  */
-export const SourcesBlock = memo(function SourcesBlock({ turnId, library }: { turnId: string; library: TurnLibrary }) {
+export const SourcesBlock = memo(function SourcesBlock({
+  turnId,
+  library,
+  stopped = false,
+}: {
+  turnId: string;
+  library: TurnLibrary;
+  /** The user stopped the turn: an unfinished library phase is expected, not a problem. */
+  stopped?: boolean;
+}) {
   const bodyId = useId();
   const [open, setOpen] = useState(false);
   const [focus, setFocus] = useState<{ id: string; seq: number } | null>(null);
@@ -38,7 +47,8 @@ export const SourcesBlock = memo(function SourcesBlock({ turnId, library }: { tu
     el.focus({ preventScroll: true });
   }, [open, focus, turnId]);
 
-  const summary = librarySummary(library);
+  const raw = librarySummary(library);
+  const summary = stopped && raw.tone === 'warning' ? { ...raw, tone: 'quiet' as const } : raw;
   const running = library.status === 'pending' || library.status === 'running';
   const icon =
     summary.tone === 'running' ? <Spinner size={15} /> : summary.tone === 'warning' ? <WarningIcon size={15} /> : <BookOpen size={15} aria-hidden="true" />;
@@ -105,7 +115,7 @@ export const SourcesBlock = memo(function SourcesBlock({ turnId, library }: { tu
 export function TurnSources({ turn }: { turn: Turn }) {
   const library = turn.library ?? null;
   if (!library) return null;
-  return <SourcesBlock turnId={turn.id} library={library} />;
+  return <SourcesBlock turnId={turn.id} library={library} stopped={turn.status === 'stopped'} />;
 }
 
 type Highlight = { id: string; seq: number } | null;

@@ -54,7 +54,8 @@ export function parsePlannerOutput(text: string): string[] {
   }
   const lines = text
     .split('\n')
-    .map((l) => l.trim())
+    // Queries are short; a long line is cut before the regexes below look at it.
+    .map((l) => l.slice(0, 500).trim())
     .filter((l) => l && !/^```/.test(l) && l !== '[' && l !== ']')
     .map((l) =>
       l

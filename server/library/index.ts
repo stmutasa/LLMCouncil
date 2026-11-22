@@ -61,7 +61,10 @@ export class LibraryIndex {
     return new LibraryIndex();
   }
 
-  /** Builds an index, yielding to the event loop regularly so the server stays responsive. */
+  /**
+   * Builds an index, yielding to the event loop every few hundred chunks (inside a large
+   * document as well as between documents) so the server stays responsive.
+   */
   static async build(
     inputs: AsyncIterable<IndexDocInput> | Iterable<IndexDocInput>,
     opts: { signal?: AbortSignal; yieldEvery?: number } = {},
@@ -69,21 +72,22 @@ export class LibraryIndex {
     const index = new LibraryIndex();
     const every = opts.yieldEvery ?? YIELD_EVERY;
     let sinceYield = 0;
+    const tick = async () => {
+      if (++sinceYield < every) return;
+      sinceYield = 0;
+      await yieldToEventLoop();
+      if (opts.signal?.aborted) throw new Error('Index build cancelled.');
+    };
     for await (const input of inputs) {
       if (opts.signal?.aborted) throw new Error('Index build cancelled.');
-      const added = index.add(input);
-      sinceYield += added;
-      if (sinceYield >= every) {
-        sinceYield = 0;
-        await yieldToEventLoop();
-      }
+      await index.add(input, tick);
     }
     index.finish();
     return index;
   }
 
-  private add(input: IndexDocInput): number {
-    if (this.byId.has(input.id)) return 0;
+  private async add(input: IndexDocInput, tick: () => Promise<void>): Promise<void> {
+    if (this.byId.has(input.id)) return;
     const docIndex = this.docs.length;
     this.docs.push({ id: input.id, sourceId: input.sourceId, partPrints: input.parts.map((p) => textPrint(p.text)) });
     this.byId.set(input.id, docIndex);
@@ -93,8 +97,10 @@ export class LibraryIndex {
     for (const t of titleTokens) titleCounts.set(t, (titleCounts.get(t) ?? 0) + 1);
 
     let n = 0;
-    input.parts.forEach((part, partIndex) => {
+    for (let partIndex = 0; partIndex < input.parts.length; partIndex++) {
+      const part = input.parts[partIndex]!;
       for (const range of chunkText(part.text)) {
+        await tick();
         const tokens = tokenize(part.text.slice(range.start, range.end));
         if (tokens.length === 0) continue;
         const chunkId = this.chunks.length;
@@ -114,8 +120,7 @@ export class LibraryIndex {
           p.tfs.push(tf);
         }
       }
-    });
-    return n;
+    }
   }
 
   private finish(): void {

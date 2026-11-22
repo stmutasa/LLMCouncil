@@ -5,7 +5,7 @@ import type { LibraryDocument, LibrarySource } from '../../../../shared/types';
 import { setAttachments } from '../../actions';
 import { useDocumentQuery } from '../../hooks/useDocumentQuery';
 import { formatNumber } from '../../lib/format';
-import { attachmentBudget, formatChars, whereText, type AttachedDocument } from '../../lib/library';
+import { attachedSize, attachmentBudget, formatChars, whereText, type AttachedDocument } from '../../lib/library';
 import { useStore, type ConversationKey } from '../../store';
 import { Dialog } from '../Dialog';
 import { WarningIcon } from '../icons';
@@ -133,7 +133,7 @@ export function AttachmentPicker({ convKey, onClose }: AttachmentPickerProps) {
                   <span className="attachment-chip-title" title={d.title}>
                     {d.title}
                   </span>
-                  <span className="attachment-chip-size">{note || formatChars(d.chars)}</span>
+                  <span className="attachment-chip-size">{note || attachedSize(d)}</span>
                   <button
                     type="button"
                     className="attachment-chip-remove"

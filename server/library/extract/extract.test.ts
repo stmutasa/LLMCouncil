@@ -1,12 +1,12 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { classifyWithoutReading, MAX_FILE_BYTES, PPT_DETAIL, STUB_DETAIL, UNSUPPORTED_DETAIL, type ExtractResult } from '../types';
 import { BinaryDataError, decodeText } from './decode';
-import { DAMAGED_OFFICE_DETAIL, extractBytes, extractFile, NOT_TEXT_DETAIL, PASSWORD_PDF_DETAIL, SCAN_DETAIL } from './formats';
-import { CUT_DETAIL, finishParts, normalizeText, oneLine } from './normalize';
+import { DAMAGED_OFFICE_DETAIL, extractBytes, extractFile, LINK_OUTSIDE_DETAIL, NOT_A_FILE_DETAIL, NOT_TEXT_DETAIL, PASSWORD_PDF_DETAIL, SCAN_DETAIL } from './formats';
+import { CUT_DETAIL, finishParts, joinLines, normalizeText, oneLine } from './normalize';
 import { rtfToText } from './rtf';
 import { readFileSync } from 'node:fs';
 
@@ -142,6 +142,37 @@ describe('extraction of every supported format', () => {
   });
 });
 
+describe('reading inside a source folder', () => {
+  let root: string;
+  let outside: string;
+  beforeAll(async () => {
+    root = await mkdtemp(path.join(os.tmpdir(), 'council-inside-'));
+    outside = await mkdtemp(path.join(os.tmpdir(), 'council-outside-'));
+    await writeFile(path.join(root, 'ok.txt'), 'inside');
+    await writeFile(path.join(outside, 'secret.txt'), 'outside');
+    await symlink(path.join(outside, 'secret.txt'), path.join(root, 'link.txt'));
+    await symlink(outside, path.join(root, 'dirlink'));
+    await mkdir(path.join(root, 'folder.txt'));
+  });
+  afterAll(async () => {
+    await rm(root, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+  });
+
+  it('reads a regular file inside the folder, also through a linked root', async () => {
+    expect(ok(await extractFile(path.join(root, 'ok.txt'), 'txt', root)).parts[0]!.text).toBe('inside');
+    const linkedRoot = path.join(outside, 'root-link');
+    await symlink(root, linkedRoot);
+    expect((await extractFile(path.join(linkedRoot, 'ok.txt'), 'txt', linkedRoot)).status).toBe('ok');
+  });
+
+  it('refuses links that lead outside, and anything that is not a regular file', async () => {
+    expect(await extractFile(path.join(root, 'link.txt'), 'txt', root)).toEqual({ status: 'error', detail: LINK_OUTSIDE_DETAIL });
+    expect(await extractFile(path.join(root, 'dirlink', 'secret.txt'), 'txt', root)).toEqual({ status: 'error', detail: LINK_OUTSIDE_DETAIL });
+    expect(await extractFile(path.join(root, 'folder.txt'), 'txt', root)).toEqual({ status: 'error', detail: NOT_A_FILE_DETAIL });
+  });
+});
+
 describe('decodeText', () => {
   it('recognises every encoding', () => {
     const cases: [string, string][] = [
@@ -173,6 +204,25 @@ describe('normalisation', () => {
   it('applies NFC, line ends, control characters, blank lines and trailing spaces', () => {
     expect(normalizeText('Café\r\nline\u0000 two  \r\n\n\n\n\nend\u0007\t ')).toBe('Café\nline two\n\n\nend');
     expect(normalizeText('\n\n  a\tb  ')).toBe('  a\tb');
+  });
+
+  it('runs in linear time on long runs of spaces', () => {
+    const cases = [
+      ' '.repeat(200_000) + 'x',
+      'x' + ' '.repeat(200_000),
+      ('a' + ' '.repeat(1_000) + '\n').repeat(200),
+      '\n'.repeat(200_000) + 'x' + ' \n'.repeat(100_000),
+      '\t \u00a0'.repeat(100_000) + 'y',
+    ];
+    const started = Date.now();
+    for (const c of cases) normalizeText(c);
+    expect(Date.now() - started).toBeLessThan(500);
+    expect(normalizeText(' '.repeat(200_000) + 'x')).toBe(' '.repeat(200_000) + 'x');
+    expect(normalizeText('x' + ' '.repeat(10) + '\n\n\n\n\ny')).toBe('x\n\n\ny');
+    const t = Date.now();
+    joinLines(' '.repeat(200_000) + 'x\n y');
+    expect(Date.now() - t).toBeLessThan(200);
+    expect(joinLines('  a \n\n  b  ')).toBe('a b');
   });
 
   it('marks a document whose parts are all empty', () => {

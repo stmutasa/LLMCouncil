@@ -20,7 +20,10 @@ export interface FolderScan {
   files: ScannedFile[];
   /** More than the file limit: the rest were not looked at. */
   truncated: boolean;
-  /** Relative directories that could not be listed; files under them must not be deleted. */
+  /**
+   * Relative directories that could not be listed, and files that could not be checked; nothing
+   * at or under these paths may be deleted.
+   */
   unreadableDirs: string[];
 }
 
@@ -102,9 +105,34 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
   return out;
 }
 
+/** Filesystem calls a scan makes; tests replace them (a drive that never answers, say). */
+export interface ScanFs {
+  readdir(dir: string): Promise<Dirent[]>;
+  lstat(file: string): Promise<{ isFile(): boolean; isDirectory(): boolean; size: number; mtimeMs: number }>;
+  stat(file: string): Promise<{ isDirectory(): boolean }>;
+}
+
+const realFs: ScanFs = {
+  readdir: (dir) => fs.readdir(dir, { withFileTypes: true }),
+  lstat: (file) => fs.lstat(file),
+  stat: (file) => fs.stat(file),
+};
+
+/** Each call of a scan gives up after this long (a hung network drive can block for minutes). */
+export const SCAN_CALL_TIMEOUT_MS = 10_000;
+/** Few calls at a time: libuv has four threads, and blocked calls must not occupy all of them. */
+const STAT_CONCURRENCY = 2;
+
+function scanAbortError(): Error {
+  const err = new Error('The scan was cancelled.');
+  err.name = 'AbortError';
+  return err;
+}
+
 /**
  * Lists the files under `root`, depth first in name order, without following symbolic links
- * and without reading any file. Never throws.
+ * and without reading any file. Every filesystem call is bounded and the walk stops promptly
+ * when `signal` is aborted (then it rejects with an AbortError). Otherwise it never throws.
  */
 export async function scanFolder(
   root: string,
@@ -112,27 +140,54 @@ export async function scanFolder(
     signal?: AbortSignal;
     maxFiles?: number;
     maxDepth?: number;
-    /** Replaces directory listing (tests simulate folders that cannot be read). */
-    readdir?: (dir: string) => Promise<Dirent[]>;
+    fs?: Partial<ScanFs>;
+    callTimeoutMs?: number;
   } = {},
 ): Promise<FolderScan> {
-  const readdir = opts.readdir ?? ((dir: string) => fs.readdir(dir, { withFileTypes: true }));
+  const ops: ScanFs = { ...realFs, ...opts.fs };
   const maxFiles = opts.maxFiles ?? MAX_FILES_PER_SOURCE;
   const maxDepth = opts.maxDepth ?? MAX_FOLDER_DEPTH;
+  const ms = opts.callTimeoutMs ?? SCAN_CALL_TIMEOUT_MS;
+  const signal = opts.signal;
+  /** One filesystem call: bounded in time, and abandoned at once on abort. */
+  const call = <T>(work: () => Promise<T>): Promise<T> => {
+    if (signal?.aborted) return Promise.reject(scanAbortError());
+    const bound = bounded(work(), ms);
+    if (!signal) return bound;
+    return new Promise<T>((resolve, reject) => {
+      const onAbort = () => reject(scanAbortError());
+      signal.addEventListener('abort', onAbort, { once: true });
+      bound.then(
+        (v) => {
+          signal.removeEventListener('abort', onAbort);
+          resolve(v);
+        },
+        (err: unknown) => {
+          signal.removeEventListener('abort', onAbort);
+          reject(err);
+        },
+      );
+    });
+  };
+  const isAbort = (err: unknown) => err instanceof Error && err.name === 'AbortError';
+
   const scan: FolderScan = { readable: true, error: null, files: [], truncated: false, unreadableDirs: [] };
   try {
-    const stat = await fs.stat(root);
+    const stat = await call(() => ops.stat(root));
     if (!stat.isDirectory()) return { ...scan, readable: false, error: describeFsError({ code: 'ENOTDIR' }) };
   } catch (err) {
+    if (isAbort(err)) throw err;
     return { ...scan, readable: false, error: describeFsError(err) };
   }
 
   const walk = async (relDir: string, depth: number): Promise<void> => {
-    if (scan.truncated || opts.signal?.aborted) return;
+    if (scan.truncated) return;
+    if (signal?.aborted) throw scanAbortError();
     let entries: Dirent[];
     try {
-      entries = await readdir(relDir ? path.join(root, ...relDir.split('/')) : root);
+      entries = await call(() => ops.readdir(relDir ? path.join(root, ...relDir.split('/')) : root));
     } catch (err) {
+      if (isAbort(err)) throw err;
       if (relDir === '') {
         scan.readable = false;
         scan.error = describeFsError(err);
@@ -150,12 +205,15 @@ export async function scanFolder(
       else if (e.isFile()) files.push(e);
       else if (!e.isFIFO() && !e.isSocket() && !e.isBlockDevice() && !e.isCharacterDevice()) {
         // Some file systems do not report entry types; ask for each such entry.
+        const rel = relDir ? `${relDir}/${e.name}` : e.name;
         try {
-          const st = await fs.lstat(path.join(root, ...(relDir ? `${relDir}/${e.name}` : e.name).split('/')));
+          const st = await call(() => ops.lstat(path.join(root, ...rel.split('/'))));
           if (st.isDirectory()) dirs.push(e);
           else if (st.isFile()) files.push(e);
-        } catch {
-          // Vanished between listing and checking.
+        } catch (err) {
+          if (isAbort(err)) throw err;
+          // Could not tell what it is: keep whatever the library has under that name.
+          scan.unreadableDirs.push(rel);
         }
       }
     }
@@ -164,24 +222,27 @@ export async function scanFolder(
       files.length = Math.max(0, room);
       scan.truncated = true;
     }
-    const stats = await mapLimit(files, 16, async (e) => {
+    const stats = await mapLimit(files, STAT_CONCURRENCY, async (e) => {
       const rel = relDir ? `${relDir}/${e.name}` : e.name;
       try {
-        const st = await fs.lstat(path.join(root, ...rel.split('/')));
+        const st = await call(() => ops.lstat(path.join(root, ...rel.split('/'))));
         return st.isFile() ? { rel, e, size: st.size, mtimeMs: st.mtimeMs } : null;
-      } catch {
-        return { rel, e, size: 0, mtimeMs: 0 };
+      } catch (err) {
+        if (isAbort(err)) throw err;
+        // Vanished since the listing: it is gone. Did not answer: it may still be there.
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') scan.unreadableDirs.push(rel);
+        return null;
       }
     });
-    for (const s of stats) {
-      if (!s) continue;
+    for (const st of stats) {
+      if (!st) continue;
       scan.files.push({
-        rel: s.rel,
-        name: s.e.name,
+        rel: st.rel,
+        name: st.e.name,
         dir: relDir,
-        type: extensionOf(s.e.name),
-        size: s.size,
-        mtimeMs: s.mtimeMs,
+        type: extensionOf(st.e.name),
+        size: st.size,
+        mtimeMs: st.mtimeMs,
       });
     }
     if (scan.truncated || depth >= maxDepth) return;

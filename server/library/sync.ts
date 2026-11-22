@@ -1,12 +1,12 @@
 import path from 'node:path';
 import type { FolderSource, NotionSource, SyncState } from '../../shared/types';
 import type { Extractor } from './extract/extractor';
-import { finishParts } from './extract/normalize';
+import { CUT_DETAIL, finishParts } from './extract/normalize';
 import { NotionError, TOKEN_REJECTED, type NotionClient } from './notionClient';
 import { scanFolder, TOO_MANY_FILES } from './sources/folder';
 import { enumerateNotion, fetchPageText, locationOf, type NotionPage } from './sources/notion';
 import { docIdFor, type LibraryStore } from './store';
-import { classifyWithoutReading, EXTRACTOR_VERSION, type DocRecord, type ExtractResult, type Part } from './types';
+import { classifyWithoutReading, EXTRACTOR_VERSION, MAX_DOCUMENT_CHARS, type DocRecord, type ExtractResult, type Part } from './types';
 
 /** Persist progress this often while reading, so a restart keeps what was done. */
 export const PERSIST_EVERY = 25;
@@ -85,6 +85,8 @@ async function applyResult(ctx: SyncContext, base: DocRecord, result: ExtractRes
 
 export interface Progress {
   state: SyncState;
+  /** Set when the queue gave up waiting for this job; it must not record anything any more. */
+  abandoned?: boolean;
 }
 
 /** Reads what changed in one folder. Unchanged files are not read again. */
@@ -149,11 +151,11 @@ export async function syncFolder(
   }
 
   if (!scan.truncated) {
-    const unreadable = scan.unreadableDirs.map((d) => `${d}/`);
     for (const [key, r] of existing) {
+      if (signal.aborted) throw abortError();
       if (seen.has(key)) continue;
-      // Files under a sub-folder that could not be listed may well still be there.
-      if (unreadable.some((d) => key.startsWith(d))) continue;
+      // Files under a sub-folder that could not be listed (or that could not be checked) may well still be there.
+      if (scan.unreadableDirs.some((d) => key === d || key.startsWith(`${d}/`))) continue;
       ctx.records.delete(r.id);
       await ctx.store.deleteParts(r.id);
       changed = true;
@@ -167,7 +169,7 @@ export async function syncFolder(
     if (signal.aborted) throw abortError();
     progress.state.current = base.title;
     const file = path.join(source.path, ...base.key.split('/'));
-    const result = await ctx.extractor.extract(file, base.type, signal);
+    const result = await ctx.extractor.extract(file, base.type, signal, source.path);
     if (signal.aborted) throw abortError();
     ctx.records.set(base.id, await applyResult(ctx, base, result));
     changed = true;
@@ -255,10 +257,13 @@ export async function syncNotion(
     progress.state.current = base.title;
     let result: ExtractResult;
     try {
-      const { text, truncated } = await fetchPageText(client, page, signal);
-      result = finishParts([{ label: '', text }], 'This page is empty.');
-      if (truncated && result.status === 'ok' && !result.detail) {
-        result = { ...result, detail: 'Notion returned only part of this page.' };
+      const fetched = await fetchPageText(client, page, signal);
+      // Capped before any processing: the page text is handled in the server process.
+      const tooLong = fetched.text.length > MAX_DOCUMENT_CHARS;
+      result = finishParts([{ label: '', text: tooLong ? fetched.text.slice(0, MAX_DOCUMENT_CHARS) : fetched.text }], 'This page is empty.');
+      if (result.status === 'ok' && !result.detail) {
+        if (tooLong) result = { ...result, detail: CUT_DETAIL };
+        else if (fetched.truncated) result = { ...result, detail: 'Notion returned only part of this page.' };
       }
     } catch (err) {
       if (signal.aborted || isAbort(err)) throw abortError();
@@ -285,15 +290,32 @@ export async function syncNotion(
  * Runs one sync at a time; further requests wait in order. Each source has a live SyncState
  * the status endpoint can read at any moment.
  */
+/** How long cancel waits for a job to stop before giving up on it. */
+export const CANCEL_WAIT_MS = 5_000;
+
+interface Job {
+  sourceId: string;
+  ctl: AbortController;
+  progress: Progress;
+  done: Promise<void>;
+}
+
+/**
+ * Runs one sync at a time; further requests wait in order. Each source has a live SyncState
+ * the status endpoint can read at any moment. A job that does not stop within a few seconds of
+ * being cancelled (a call stuck on a hung drive) is abandoned: the queue moves on, and the job,
+ * marked abandoned and aborted, may no longer record anything.
+ */
 export class SyncQueue {
   private readonly queue: string[] = [];
-  private current: { sourceId: string; ctl: AbortController; done: Promise<void> } | null = null;
+  private current: Job | null = null;
   private readonly states = new Map<string, SyncState>();
   private stopped = false;
 
   constructor(
     private readonly run: (sourceId: string, signal: AbortSignal, progress: Progress) => Promise<void>,
     private readonly onIdle: () => void,
+    private readonly cancelWaitMs = CANCEL_WAIT_MS,
   ) {}
 
   state(sourceId: string, lastError: string | null): SyncState {
@@ -323,11 +345,39 @@ export class SyncQueue {
       this.queue.splice(i, 1);
       this.states.delete(sourceId);
     }
-    if (this.current?.sourceId === sourceId) {
-      this.current.ctl.abort();
-      return this.current.done;
-    }
+    const job = this.current;
+    if (job?.sourceId === sourceId) return this.stopJob(job);
     return Promise.resolve();
+  }
+
+  private stopJob(job: Job): Promise<void> {
+    job.ctl.abort();
+    return new Promise<void>((resolve) => {
+      const t = setTimeout(() => {
+        this.abandon(job);
+        resolve();
+      }, this.cancelWaitMs);
+      t.unref?.();
+      void job.done.then(() => {
+        clearTimeout(t);
+        resolve();
+      });
+    });
+  }
+
+  private abandon(job: Job): void {
+    if (this.current !== job) return;
+    job.progress.abandoned = true;
+    console.warn(`[library] The check of source ${job.sourceId} did not stop when cancelled; it was abandoned.`);
+    this.release(job);
+  }
+
+  private release(job: Job): void {
+    if (this.states.get(job.sourceId) === job.progress.state) this.states.delete(job.sourceId);
+    if (this.current === job) {
+      this.current = null;
+      this.pump();
+    }
   }
 
   private pump(): void {
@@ -340,27 +390,22 @@ export class SyncQueue {
     const ctl = new AbortController();
     const progress: Progress = {
       state: { running: true, phase: 'scanning', done: 0, total: 0, current: '', error: null },
+      abandoned: false,
     };
     this.states.set(sourceId, progress.state);
-    const done = this.run(sourceId, ctl.signal, progress)
+    const job: Job = { sourceId, ctl, progress, done: Promise.resolve() };
+    job.done = this.run(sourceId, ctl.signal, progress)
       .catch((err: unknown) => {
         console.error(`[library] Sync of source ${sourceId} failed:`, err);
       })
-      .finally(() => {
-        this.states.delete(sourceId);
-        this.current = null;
-        this.pump();
-      });
-    this.current = { sourceId, ctl, done };
+      .finally(() => this.release(job));
+    this.current = job;
   }
 
   async shutdown(): Promise<void> {
     this.stopped = true;
     this.queue.length = 0;
     for (const id of [...this.states.keys()]) if (this.current?.sourceId !== id) this.states.delete(id);
-    if (this.current) {
-      this.current.ctl.abort();
-      await this.current.done;
-    }
+    if (this.current) await this.stopJob(this.current);
   }
 }

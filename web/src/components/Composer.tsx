@@ -12,7 +12,7 @@ import {
   stopTurn,
 } from '../actions';
 import { formatNumber, plural } from '../lib/format';
-import { anySyncActive, attachmentBudget, browseNote, browseSupport, formatChars, type AttachedDocument } from '../lib/library';
+import { anySyncActive, attachedSize, attachmentBudget, browseNote, browseSupport, type AttachedDocument } from '../lib/library';
 import { activeProtocol, arbiterFromMember, arbiterMatchesMember, enabledMembers } from '../lib/settings';
 import { canSkipToVerdict } from '../lib/turn';
 import { useStore, type ConversationKey } from '../store';
@@ -192,7 +192,7 @@ function AttachmentChips({ convKey, attachments, budget }: { convKey: string; at
             <li key={d.id} className={`attachment-chip${note ? ' over' : ''}`} title={note ? `${d.title}\n${note}` : d.title}>
               {note ? <WarningIcon size={13} /> : <FileText size={13} aria-hidden="true" />}
               <span className="attachment-chip-title">{d.title}</span>
-              <span className="attachment-chip-size">{formatChars(d.chars)}</span>
+              <span className="attachment-chip-size">{attachedSize(d)}</span>
               {note && <span className="visually-hidden">{note}</span>}
               <button
                 type="button"
@@ -225,9 +225,10 @@ function LibraryMenu({ settings }: { settings: Settings }) {
   // because of a failed status request.
   const documents = status ? status.documents : null;
   const empty = !hasSources || documents === 0;
+  const allOff = hasSources && settings.library.sources.every((src) => !src.enabled);
   const reading = documents === 0 && anySyncActive(status);
 
-  const label = !hasSources ? 'Library' : reading ? 'Library: reading…' : documents === 0 ? 'Library: empty' : `Library: ${mode}`;
+  const label = !hasSources ? 'Library' : allOff ? 'Library: sources off' : reading ? 'Library: reading…' : documents === 0 ? 'Library: empty' : `Library: ${mode}`;
   const active = !empty && mode !== 'off';
   const note = providers ? browseNote(browseSupport(settings, providers)) : '';
   const setMode = (next: LibraryMode) => {
@@ -255,13 +256,15 @@ function LibraryMenu({ settings }: { settings: Settings }) {
           description={
             !hasSources
               ? 'Add folders or a Notion workspace so the council can use your own documents.'
-              : reading
+              : allOff
+                ? 'Every source is turned off.'
+                : reading
                 ? 'Your documents are being read. They can be searched as soon as some are ready.'
                 : 'None of the documents in your sources could be read yet.'
           }
           onSelect={() => openSettings('library')}
         >
-          Add documents…
+          {allOff ? 'Manage library…' : 'Add documents…'}
         </MenuItem>
       ) : (
         <>

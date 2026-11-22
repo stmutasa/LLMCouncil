@@ -71,8 +71,8 @@ export interface MockContext {
 
 /** A sentence citing the first passage and attachment the prompt offers, so citations can be exercised. */
 function citations(prompt: string): string {
-  const s = /<source id="(S\d+)"/.exec(prompt)?.[1];
-  const d = /<document id="(D\d+)"/.exec(prompt)?.[1];
+  const s = /<source-[a-z0-9]+ id="(S\d+)"/.exec(prompt)?.[1];
+  const d = /<document-[a-z0-9]+ id="(D\d+)"/.exec(prompt)?.[1];
   const refs = [s, d].filter(Boolean).map((id) => `[${id}]`);
   return refs.length ? `The user's documents bear on this ${refs.join(' ')}.` : '';
 }

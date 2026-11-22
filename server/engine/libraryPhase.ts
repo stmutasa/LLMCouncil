@@ -15,7 +15,7 @@ import { cutAtBoundary, renderParts } from '../library/render';
 import type { FoundPassage } from '../library/search';
 import type { Part } from '../library/types';
 import { withoutFinalPeriod } from '../util/text';
-import type { LibraryPromptMaterial } from './prompts';
+import { chooseLibraryTag, type LibraryPromptMaterial } from './prompts';
 import type { ProviderSource } from './orchestrator';
 
 /**
@@ -241,6 +241,8 @@ export interface LibraryPhaseInput {
   attachmentIds: string[];
   signal: AbortSignal;
   emit: (event: RunEvent) => void;
+  /** Picks the turn's tag code (see chooseLibraryTag); never stored on the turn. */
+  rng: () => number;
 }
 
 /**
@@ -287,6 +289,7 @@ export async function runLibraryPhase(input: LibraryPhaseInput): Promise<TurnLib
     notIncluded: [],
     browseDocuments: gathered.browseDocuments,
     browseDir: gathered.browseDir,
+    tag: '',
   };
   for (const o of gathered.outcomes) {
     if (o.text !== null) {
@@ -302,6 +305,7 @@ export async function runLibraryPhase(input: LibraryPhaseInput): Promise<TurnLib
       material.notIncluded.push({ title: o.attachment.title, problem: o.attachment.problem });
     }
   }
+  material.tag = chooseLibraryTag(input.rng, material);
   input.emit({ type: 'library.end', library: structuredClone(lib) });
   return material;
 }

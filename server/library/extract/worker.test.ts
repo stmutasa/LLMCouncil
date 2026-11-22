@@ -1,4 +1,4 @@
-import { copyFile, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -96,6 +96,19 @@ describe('extraction worker', () => {
     e.stop();
     await waitFor(() => liveWorkerCount() === 0);
     expect(e.running).toBe(false);
+  });
+
+  it('refuses, in the worker, a link that leads outside the source folder', async () => {
+    const e = make();
+    const outside = path.join(dir, 'outside-secret.txt');
+    await writeFile(outside, 'outside');
+    const root = path.join(dir, 'root');
+    await mkdir(root, { recursive: true });
+    await symlink(outside, path.join(root, 'innocent.txt'));
+    expect(await e.extract(path.join(root, 'innocent.txt'), 'txt', undefined, root)).toEqual({
+      status: 'error',
+      detail: 'This file is a link that points outside the folder.',
+    });
   });
 
   it('does not honour test file names unless test hooks are on', async () => {

@@ -9,8 +9,11 @@ export const TIMEOUT_DETAIL = 'Reading this file took too long.';
 
 /** What the sync manager needs from an extractor (tests substitute their own). */
 export interface Extractor {
-  /** Never rejects except with an AbortError when `signal` is aborted. */
-  extract(file: string, type: string, signal?: AbortSignal): Promise<ExtractResult>;
+  /**
+   * Never rejects except with an AbortError when `signal` is aborted. With `root`, only a regular
+   * file that is really inside that folder is read.
+   */
+  extract(file: string, type: string, signal?: AbortSignal, root?: string): Promise<ExtractResult>;
   /** Ends the worker process, if any. The next extract() starts a fresh one. */
   stop(): void;
 }
@@ -110,13 +113,13 @@ export class WorkerExtractor implements Extractor {
     }
   }
 
-  extract(file: string, type: string, signal?: AbortSignal): Promise<ExtractResult> {
-    const run = this.queue.then(() => this.extractNow(file, type, signal));
+  extract(file: string, type: string, signal?: AbortSignal, root?: string): Promise<ExtractResult> {
+    const run = this.queue.then(() => this.extractNow(file, type, signal, root));
     this.queue = run.catch(() => undefined);
     return run;
   }
 
-  private extractNow(file: string, type: string, signal?: AbortSignal): Promise<ExtractResult> {
+  private extractNow(file: string, type: string, signal?: AbortSignal, root?: string): Promise<ExtractResult> {
     if (signal?.aborted) return Promise.reject(abortError());
     const worker = this.worker ?? this.start();
     const id = this.nextId++;
@@ -160,7 +163,7 @@ export class WorkerExtractor implements Extractor {
       worker.on('exit', onExit);
       worker.on('error', onError);
       signal?.addEventListener('abort', onAbort, { once: true });
-      const request: WorkerRequest = { id, file, type };
+      const request: WorkerRequest = { id, file, type, root };
       try {
         worker.send(request, (err) => {
           if (err) onError(err);

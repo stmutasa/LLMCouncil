@@ -1,4 +1,4 @@
-import { promises as fs } from 'node:fs';
+import { constants as fsConstants, promises as fs } from 'node:fs';
 import mammoth from 'mammoth';
 import { NodeHtmlMarkdown } from 'node-html-markdown';
 import { extractText, getDocumentProxy } from 'unpdf';
@@ -7,9 +7,10 @@ import * as XLSX from 'xlsx';
 import * as cptable from 'xlsx/dist/cpexcel.full.mjs';
 import type { ExtractResult, Part } from '../types';
 import { BinaryDataError, decodeText } from './decode';
-import { finishParts, oneLine } from './normalize';
+import { finishParts, joinLines, oneLine } from './normalize';
 import { DamagedOfficeFileError, extractPptx } from './pptx';
 import { rtfToText } from './rtf';
+import { isWithin } from '../sources/folder';
 
 // Without the code page tables, legacy .xls files with non-ASCII text decode incorrectly.
 XLSX.set_cptable(cptable);
@@ -98,12 +99,13 @@ function sheetParts(bytes: Uint8Array): Part[] {
     if (!ws) return;
     const rows = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, raw: false, blankrows: false });
     const lines = rows
-      .map((row) =>
-        (Array.isArray(row) ? row : [])
-          .map((cell) => (cell === null || cell === undefined ? '' : String(cell).replace(/\s*\n\s*/g, ' ')))
-          .join(' | ')
-          .replace(/(?: \| )+$/, ''),
-      )
+      .map((row) => {
+        const cells = (Array.isArray(row) ? row : []).map((cell) =>
+          cell === null || cell === undefined ? '' : joinLines(String(cell)),
+        );
+        while (cells.length > 0 && cells[cells.length - 1]!.trim() === '') cells.pop();
+        return cells.join(' | ');
+      })
       .filter((line) => line.replace(/[\s|]/g, '') !== '');
     if (lines.length === 0) return;
     const hidden = (wb.Workbook?.Sheets?.[i]?.Hidden ?? 0) > 0;
@@ -169,11 +171,44 @@ export function describeFailure(err: unknown, type: string): ExtractResult {
 }
 
 /** Reads and extracts one file. Never throws. */
-export async function extractFile(file: string, type: string): Promise<ExtractResult> {
+export const LINK_OUTSIDE_DETAIL = 'This file is a link that points outside the folder.';
+export const NOT_A_FILE_DETAIL = 'This is no longer a regular file (it was replaced by a link or a folder since the folder was checked).';
+
+/**
+ * Reads a file of a folder source, refusing anything that is not, at this moment, a regular file
+ * inside `root`: the scan skipped links, but a file can be replaced by one before it is read.
+ * The final component is opened without following links where the platform allows it.
+ */
+async function readInside(file: string, root: string): Promise<Uint8Array | ExtractResult> {
+  const [realFile, realRoot] = await Promise.all([fs.realpath(file), fs.realpath(root)]);
+  if (!isWithin(realFile, realRoot)) return { status: 'error', detail: LINK_OUTSIDE_DETAIL };
+  const before = await fs.lstat(file);
+  if (!before.isFile()) return { status: 'error', detail: before.isSymbolicLink() ? LINK_OUTSIDE_DETAIL : NOT_A_FILE_DETAIL };
+  const noFollow = (fsConstants as { O_NOFOLLOW?: number }).O_NOFOLLOW;
+  const handle = await fs.open(file, noFollow === undefined ? fsConstants.O_RDONLY : fsConstants.O_RDONLY | noFollow);
+  try {
+    const st = await handle.stat();
+    // The same file that was checked above, still a regular file.
+    if (!st.isFile() || st.ino !== before.ino || st.dev !== before.dev) return { status: 'error', detail: NOT_A_FILE_DETAIL };
+    return await handle.readFile();
+  } finally {
+    await handle.close();
+  }
+}
+
+/** Reads and extracts one file; with `root`, only a regular file inside that folder. Never throws. */
+export async function extractFile(file: string, type: string, root?: string): Promise<ExtractResult> {
   let bytes: Uint8Array;
   try {
-    bytes = await fs.readFile(file);
+    if (root === undefined) {
+      bytes = await fs.readFile(file);
+    } else {
+      const read = await readInside(file, root);
+      if (!(read instanceof Uint8Array)) return read;
+      bytes = read;
+    }
   } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ELOOP') return { status: 'error', detail: LINK_OUTSIDE_DETAIL };
     return describeFailure(err, type);
   }
   return extractBytes(bytes, type);

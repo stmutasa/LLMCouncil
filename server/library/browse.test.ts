@@ -207,6 +207,38 @@ describe('BrowseMirror', () => {
     expect(await readFile(path.join(store.browseDir, 'INDEX.md'), 'utf8')).toContain('1 document.');
   });
 
+  it('keeps long non-ASCII names within 255 bytes and writes them', async () => {
+    const title = '日本語のとても長いタイトル'.repeat(8);
+    const notion = rec({ id: 'c'.repeat(20), sourceId: 'n', key: 'abcdef12-0000', title, type: 'notion' });
+    const file = rec({ id: 'd'.repeat(20), sourceId: 'f', key: `${'é'.repeat(130)}/${'ü'.repeat(200)}.pdf` });
+    parts.set('c'.repeat(20), [{ label: '', text: 'notion text' }]);
+    parts.set('d'.repeat(20), [{ label: '', text: 'pdf text' }]);
+    const mirror = new BrowseMirror(store);
+    const res = await mirror.update(sources, [notion, file], load);
+    expect(res.documents).toBe(2);
+    for (const p of await listAll(store.browseDir)) {
+      for (const seg of p.split('/')) expect(Buffer.byteLength(seg) + 14).toBeLessThanOrEqual(255);
+    }
+    expect(safeSegment('😀'.repeat(100)).length).toBeLessThanOrEqual(120);
+    expect(Buffer.byteLength(safeSegment('😀'.repeat(100)))).toBeLessThanOrEqual(200);
+  });
+
+  it('leaves out a document that cannot be written and still writes the rest', async () => {
+    const mirror = new BrowseMirror(store);
+    const failing = async (id: string) => {
+      if (id === 'a'.repeat(20)) throw new Error('ENAMETOOLONG: name too long');
+      return load(id);
+    };
+    const res = await mirror.update([sources[0]!], records, failing);
+    expect(res.documents).toBe(1);
+    expect(await listAll(store.browseDir)).toEqual(['INDEX.md', 'My Docs/memo.txt.md']);
+    const index = await readFile(path.join(store.browseDir, 'INDEX.md'), 'utf8');
+    expect(index).toContain('1 document.');
+    expect(index).not.toContain('report.pdf');
+    // It is tried again next time.
+    expect((await mirror.update([sources[0]!], records, load)).documents).toBe(2);
+  });
+
   it('notes a document whose text is missing instead of failing', async () => {
     const mirror = new BrowseMirror(store);
     parts.delete('b'.repeat(20));

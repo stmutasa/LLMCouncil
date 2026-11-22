@@ -92,9 +92,9 @@ const NO_ATTACHMENTS: readonly { title: string }[] = [];
  */
 function turnAttachmentTitles(turn: Turn, sent: readonly { title: string }[] | undefined): readonly { title: string }[] {
   const library = turn.library ?? null;
-  if (library && (library.attachments.length > 0 || library.status === 'done' || library.status === 'error')) {
-    return library.attachments.length > 0 ? library.attachments : NO_ATTACHMENTS;
-  }
+  if (library && library.attachments.length > 0) return library.attachments;
+  // A finished phase lists every attachment (with problems); an error or a stop may list none.
+  if (library?.status === 'done') return NO_ATTACHMENTS;
   return sent ?? NO_ATTACHMENTS;
 }
 
